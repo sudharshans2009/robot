@@ -609,7 +609,20 @@ wss.on("connection", (ws) => {
           adminOverride.flex = data.overrideState.flex;
           adminOverride.biometric = data.overrideState.biometric;
           adminOverride.mech = data.overrideState.mech;
-          adminOverride.thresholds = data.overrideState.thresholds;
+          
+          // Merge thresholds but enforce correct temperature max
+          if (data.overrideState.thresholds) {
+            adminOverride.thresholds = {
+              ...data.overrideState.thresholds,
+              temperature: {
+                min: 20,
+                max: 48,
+                critical_low: 15,
+                critical_high: 35
+              }
+            };
+          }
+          
           adminOverride.autoEmergency = data.overrideState.autoEmergency;
           
           console.log(`[ADMIN] Override state updated`);
