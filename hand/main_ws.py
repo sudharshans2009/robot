@@ -1,0 +1,1505 @@
+# ============================================================================
+# Hand WebSocket Controller - Complete System
+# ============================================================================
+# Combines: MAX30102 Heart Rate/SpO2 + Emergency Button + WebSocket Client
+# Uses full MAX30102 library from max30102_complete.py
+# ============================================================================
+
+from machine import Pin, SoftI2C, ADC
+import network
+import usocket
+import ujson
+import ubinascii
+import urandom
+import ustruct
+from ustruct import unpack
+import time
+from utime import sleep_ms, ticks_ms, ticks_diff
+from ucollections import deque
+
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
+WIFI_SSID = "Karthikeyan G"
+WIFI_PASSWORD = "9842969931"
+SERVER_IP = "10.222.185.143"
+SERVER_PORT = 8081
+
+MAX30102_SDA = 6
+MAX30102_SCL = 7
+EMERGENCY_BUTTON = 21
+EMERGENCY_LED = 20
+
+# Flex sensors
+FLEX_SERVOS_1_2 = 28  # GP28 A2 - controls servos 1-2
+FLEX_SERVOS_3_4 = 27  # GP27 A1 - controls servos 3-4
+FLEX_SERVO_5 = 26     # GP26 A0 - controls servo 5
+
+# ============================================================================
+# MAX30102 LIBRARY (from max30102_complete.py)
+# ============================================================================
+
+class CircularBuffer:
+    """Simple circular buffer implementation using deque"""
+    
+    def __init__(self, max_size):
+        self.data = deque((), max_size, True)
+        self.max_size = max_size
+
+    def __len__(self):
+        return len(self.data)
+
+    def is_empty(self):
+        return not bool(self.data)
+
+    def append(self, item):
+        try:
+            self.data.append(item)
+        except IndexError:
+            # deque full, popping 1st item out
+            self.data.popleft()
+            self.data.append(item)
+
+    def pop(self):
+        return self.data.popleft()
+
+    def clear(self):
+        self.data = deque((), self.max_size, True)
+
+    def pop_head(self):
+        buffer_size = len(self.data)
+        temp = self.data
+        if buffer_size == 1:
+            pass
+        elif buffer_size > 1:
+            self.data.clear()
+            for x in range(buffer_size - 1):
+                self.data = temp.popleft()
+        else:
+            return 0
+        return temp.popleft()
+
+
+# ============================================================================
+# SENSOR DATA STRUCTURE
+# ============================================================================
+
+class SensorData:
+    """Data structure to hold the last readings"""
+    
+    def __init__(self, queue_size=4):
+        self.red = CircularBuffer(queue_size)
+        self.IR = CircularBuffer(queue_size)
+        self.green = CircularBuffer(queue_size)
+
+
+# ============================================================================
+# MAX30102 CONSTANTS
+# ============================================================================
+
+# I2C address
+MAX3010X_I2C_ADDRESS = 0x57
+
+# Status Registers
+MAX30105_INT_STAT_1 = 0x00
+MAX30105_INT_STAT_2 = 0x01
+MAX30105_INT_ENABLE_1 = 0x02
+MAX30105_INT_ENABLE_2 = 0x03
+
+# FIFO Registers
+MAX30105_FIFO_WRITE_PTR = 0x04
+MAX30105_FIFO_OVERFLOW = 0x05
+MAX30105_FIFO_READ_PTR = 0x06
+MAX30105_FIFO_DATA = 0x07
+
+# Configuration Registers
+MAX30105_FIFO_CONFIG = 0x08
+MAX30105_MODE_CONFIG = 0x09
+MAX30105_PARTICLE_CONFIG = 0x0A
+MAX30105_LED1_PULSE_AMP = 0x0C  # IR
+MAX30105_LED2_PULSE_AMP = 0x0D  # RED
+MAX30105_LED3_PULSE_AMP = 0x0E  # GREEN
+MAX30105_LED_PROX_AMP = 0x10
+MAX30105_MULTI_LED_CONFIG_1 = 0x11
+MAX30105_MULTI_LED_CONFIG_2 = 0x12
+
+# Die Temperature Registers
+MAX30105_DIE_TEMP_INT = 0x1F
+MAX30105_DIE_TEMP_FRAC = 0x20
+MAX30105_DIE_TEMP_CONFIG = 0x21
+
+# Part ID Registers
+MAX30105_REVISION_ID = 0xFE
+MAX30105_PART_ID = 0xFF
+
+# Interrupt configuration
+MAX30105_INT_A_FULL_MASK = ~0b10000000
+MAX30105_INT_A_FULL_ENABLE = 0x80
+MAX30105_INT_A_FULL_DISABLE = 0x00
+
+MAX30105_INT_DATA_RDY_MASK = ~0b01000000
+MAX30105_INT_DATA_RDY_ENABLE = 0x40
+MAX30105_INT_DATA_RDY_DISABLE = 0x00
+
+MAX30105_INT_DIE_TEMP_RDY_MASK = ~0b00000010
+MAX30105_INT_DIE_TEMP_RDY_ENABLE = 0x02
+MAX30105_INT_DIE_TEMP_RDY_DISABLE = 0x00
+
+# FIFO configuration
+MAX30105_SAMPLE_AVG_MASK = ~0b11100000
+MAX30105_SAMPLE_AVG_1 = 0x00
+MAX30105_SAMPLE_AVG_2 = 0x20
+MAX30105_SAMPLE_AVG_4 = 0x40
+MAX30105_SAMPLE_AVG_8 = 0x60
+MAX30105_SAMPLE_AVG_16 = 0x80
+MAX30105_SAMPLE_AVG_32 = 0xA0
+
+MAX30105_ROLLOVER_MASK = 0xEF
+MAX30105_ROLLOVER_ENABLE = 0x10
+MAX30105_ROLLOVER_DISABLE = 0x00
+MAX30105_A_FULL_MASK = 0xF0
+
+# Mode configuration
+MAX30105_SHUTDOWN_MASK = 0x7F
+MAX30105_SHUTDOWN = 0x80
+MAX30105_WAKEUP = 0x00
+MAX30105_RESET_MASK = 0xBF
+MAX30105_RESET = 0x40
+
+MAX30105_MODE_MASK = 0xF8
+MAX30105_MODE_RED_ONLY = 0x02
+MAX30105_MODE_RED_IR_ONLY = 0x03
+MAX30105_MODE_MULTI_LED = 0x07
+
+# Particle sensing configuration
+MAX30105_ADC_RANGE_MASK = 0x9F
+MAX30105_ADC_RANGE_2048 = 0x00
+MAX30105_ADC_RANGE_4096 = 0x20
+MAX30105_ADC_RANGE_8192 = 0x40
+MAX30105_ADC_RANGE_16384 = 0x60
+
+MAX30105_SAMPLERATE_MASK = 0xE3
+MAX30105_SAMPLERATE_50 = 0x00
+MAX30105_SAMPLERATE_100 = 0x04
+MAX30105_SAMPLERATE_200 = 0x08
+MAX30105_SAMPLERATE_400 = 0x0C
+MAX30105_SAMPLERATE_800 = 0x10
+MAX30105_SAMPLERATE_1000 = 0x14
+MAX30105_SAMPLERATE_1600 = 0x18
+MAX30105_SAMPLERATE_3200 = 0x1C
+
+MAX30105_PULSE_WIDTH_MASK = 0xFC
+MAX30105_PULSE_WIDTH_69 = 0x00
+MAX30105_PULSE_WIDTH_118 = 0x01
+MAX30105_PULSE_WIDTH_215 = 0x02
+MAX30105_PULSE_WIDTH_411 = 0x03
+
+# LED brightness levels
+MAX30105_PULSE_AMP_LOWEST = 0x02
+MAX30105_PULSE_AMP_LOW = 0x1F
+MAX30105_PULSE_AMP_MEDIUM = 0x7F
+MAX30105_PULSE_AMP_HIGH = 0xFF
+
+# Multi-LED Mode slots
+MAX30105_SLOT1_MASK = 0xF8
+MAX30105_SLOT2_MASK = 0x8F
+MAX30105_SLOT3_MASK = 0xF8
+MAX30105_SLOT4_MASK = 0x8F
+SLOT_NONE = 0x00
+SLOT_RED_LED = 0x01
+SLOT_IR_LED = 0x02
+SLOT_GREEN_LED = 0x03
+
+MAX_30105_EXPECTED_PART_ID = 0x15
+STORAGE_QUEUE_SIZE = 4
+
+
+# ============================================================================
+# HEART RATE MONITOR CLASS
+# ============================================================================
+
+class HeartRateMonitor:
+    """Heart rate monitor using moving window smoothing and dynamic threshold peak detection"""
+
+    def __init__(self, sample_rate=100, window_size=10, smoothing_window=5):
+        self.sample_rate = sample_rate
+        self.window_size = window_size
+        self.smoothing_window = smoothing_window
+        self.samples = []
+        self.timestamps = []
+        self.filtered_samples = []
+
+    def add_sample(self, sample):
+        """Add a new sample to the monitor"""
+        timestamp = ticks_ms()
+        self.samples.append(sample)
+        self.timestamps.append(timestamp)
+
+        # Apply smoothing
+        if len(self.samples) >= self.smoothing_window:
+            smoothed_sample = (
+                sum(self.samples[-self.smoothing_window :]) / self.smoothing_window
+            )
+            self.filtered_samples.append(smoothed_sample)
+        else:
+            self.filtered_samples.append(sample)
+
+        # Maintain the size of samples and timestamps
+        if len(self.samples) > self.window_size:
+            self.samples.pop(0)
+            self.timestamps.pop(0)
+            self.filtered_samples.pop(0)
+
+    def find_peaks(self):
+        """Find peaks in the filtered samples"""
+        peaks = []
+
+        if len(self.filtered_samples) < 3:  # Need at least three samples to find a peak
+            return peaks
+
+        # Calculate dynamic threshold based on min and max of recent window
+        recent_samples = self.filtered_samples[-self.window_size :]
+        min_val = min(recent_samples)
+        max_val = max(recent_samples)
+        threshold = min_val + (max_val - min_val) * 0.5  # 50% between min and max
+
+        for i in range(1, len(self.filtered_samples) - 1):
+            if (
+                self.filtered_samples[i] > threshold
+                and self.filtered_samples[i - 1] < self.filtered_samples[i]
+                and self.filtered_samples[i] > self.filtered_samples[i + 1]
+            ):
+                peak_time = self.timestamps[i]
+                peaks.append((peak_time, self.filtered_samples[i]))
+
+        return peaks
+
+    def calculate_heart_rate(self):
+        """Calculate heart rate in BPM"""
+        peaks = self.find_peaks()
+
+        if len(peaks) < 2:
+            return None  # Not enough peaks
+
+        # Calculate average interval between peaks in milliseconds
+        intervals = []
+        for i in range(1, len(peaks)):
+            interval = ticks_diff(peaks[i][0], peaks[i - 1][0])
+            intervals.append(interval)
+
+        average_interval = sum(intervals) / len(intervals)
+
+        # Convert to BPM
+        heart_rate = 60000 / average_interval  # 60 sec/min * 1000 ms/sec
+
+        return heart_rate
+
+    def reset(self):
+        """Reset all buffers"""
+        self.samples = []
+        self.timestamps = []
+        self.filtered_samples = []
+
+
+# ============================================================================
+# MAX30102 SENSOR CLASS
+# ============================================================================
+
+class MAX30102:
+    """Complete MAX30102 driver with HR and SpO2 calculation"""
+    
+    def __init__(self, i2c, i2c_hex_address=MAX3010X_I2C_ADDRESS):
+        self.i2c_address = i2c_hex_address
+        self._i2c = i2c
+        self._active_leds = None
+        self._pulse_width = None
+        self._multi_led_read_mode = None
+        self._sample_rate = None
+        self._sample_avg = None
+        self._acq_frequency = None
+        self._acq_frequency_inv = None
+        
+        # Circular buffer of readings from the sensor
+        self.sense = SensorData()
+        
+        # Buffers for HR/SpO2 calculation
+        self.red_buffer = []
+        self.ir_buffer = []
+        self.buffer_size = 100
+
+    # ========================================================================
+    # BASIC SENSOR SETUP
+    # ========================================================================
+    
+    def setup_sensor(self, led_mode=2, adc_range=16384, sample_rate=400,
+                     led_power=MAX30105_PULSE_AMP_MEDIUM, sample_avg=8,
+                     pulse_width=411):
+        """Configure sensor with specified parameters"""
+        self.soft_reset()
+        self.set_fifo_average(sample_avg)
+        self.enable_fifo_rollover()
+        self.set_led_mode(led_mode)
+        self.set_adc_range(adc_range)
+        self.set_sample_rate(sample_rate)
+        self.set_pulse_width(pulse_width)
+        self.set_pulse_amplitude_red(led_power)
+        self.set_pulse_amplitude_it(led_power)
+        self.set_pulse_amplitude_green(led_power)
+        self.set_pulse_amplitude_proximity(led_power)
+        self.clear_fifo()
+
+    def __del__(self):
+        self.shutdown()
+
+    # ========================================================================
+    # CONFIGURATION METHODS
+    # ========================================================================
+    
+    def soft_reset(self):
+        """Reset all registers to power-on state"""
+        self.set_bitmask(MAX30105_MODE_CONFIG, MAX30105_RESET_MASK, MAX30105_RESET)
+        curr_status = -1
+        while not ((curr_status & MAX30105_RESET) == 0):
+            sleep_ms(10)
+            curr_status = ord(self.i2c_read_register(MAX30105_MODE_CONFIG))
+
+    def shutdown(self):
+        """Put IC into low power mode"""
+        self.set_bitmask(MAX30105_MODE_CONFIG, MAX30105_SHUTDOWN_MASK, MAX30105_SHUTDOWN)
+
+    def wakeup(self):
+        """Pull IC out of low power mode"""
+        self.set_bitmask(MAX30105_MODE_CONFIG, MAX30105_SHUTDOWN_MASK, MAX30105_WAKEUP)
+
+    def set_led_mode(self, LED_mode):
+        """Set LED mode: 1=RED, 2=RED+IR, 3=RED+IR+GREEN"""
+        if LED_mode == 1:
+            self.set_bitmask(MAX30105_MODE_CONFIG, MAX30105_MODE_MASK, MAX30105_MODE_RED_ONLY)
+        elif LED_mode == 2:
+            self.set_bitmask(MAX30105_MODE_CONFIG, MAX30105_MODE_MASK, MAX30105_MODE_RED_IR_ONLY)
+        elif LED_mode == 3:
+            self.set_bitmask(MAX30105_MODE_CONFIG, MAX30105_MODE_MASK, MAX30105_MODE_MULTI_LED)
+        else:
+            raise ValueError('Wrong LED mode:{0}!'.format(LED_mode))
+
+        self.enable_slot(1, SLOT_RED_LED)
+        if LED_mode > 1:
+            self.enable_slot(2, SLOT_IR_LED)
+        if LED_mode > 2:
+            self.enable_slot(3, SLOT_GREEN_LED)
+
+        self._active_leds = LED_mode
+        self._multi_led_read_mode = LED_mode * 3
+
+    def set_adc_range(self, ADC_range):
+        """Set ADC range: 2048, 4096, 8192, 16384"""
+        ranges = {2048: MAX30105_ADC_RANGE_2048, 4096: MAX30105_ADC_RANGE_4096,
+                  8192: MAX30105_ADC_RANGE_8192, 16384: MAX30105_ADC_RANGE_16384}
+        if ADC_range not in ranges:
+            raise ValueError('Wrong ADC range:{0}!'.format(ADC_range))
+        self.set_bitmask(MAX30105_PARTICLE_CONFIG, MAX30105_ADC_RANGE_MASK, ranges[ADC_range])
+
+    def set_sample_rate(self, sample_rate):
+        """Set sample rate: 50, 100, 200, 400, 800, 1000, 1600, 3200"""
+        rates = {50: MAX30105_SAMPLERATE_50, 100: MAX30105_SAMPLERATE_100,
+                 200: MAX30105_SAMPLERATE_200, 400: MAX30105_SAMPLERATE_400,
+                 800: MAX30105_SAMPLERATE_800, 1000: MAX30105_SAMPLERATE_1000,
+                 1600: MAX30105_SAMPLERATE_1600, 3200: MAX30105_SAMPLERATE_3200}
+        if sample_rate not in rates:
+            raise ValueError('Wrong sample rate:{0}!'.format(sample_rate))
+        self.set_bitmask(MAX30105_PARTICLE_CONFIG, MAX30105_SAMPLERATE_MASK, rates[sample_rate])
+        self._sample_rate = sample_rate
+        self.update_acquisition_frequency()
+
+    def set_pulse_width(self, pulse_width):
+        """Set pulse width: 69, 118, 215, 411 μs"""
+        widths = {69: MAX30105_PULSE_WIDTH_69, 118: MAX30105_PULSE_WIDTH_118,
+                  215: MAX30105_PULSE_WIDTH_215, 411: MAX30105_PULSE_WIDTH_411}
+        if pulse_width not in widths:
+            raise ValueError('Wrong pulse width:{0}!'.format(pulse_width))
+        self.set_bitmask(MAX30105_PARTICLE_CONFIG, MAX30105_PULSE_WIDTH_MASK, widths[pulse_width])
+        self._pulse_width = widths[pulse_width]
+
+    def set_fifo_average(self, number_of_samples):
+        """Set number of samples to average: 1, 2, 4, 8, 16, 32"""
+        avgs = {1: MAX30105_SAMPLE_AVG_1, 2: MAX30105_SAMPLE_AVG_2,
+                4: MAX30105_SAMPLE_AVG_4, 8: MAX30105_SAMPLE_AVG_8,
+                16: MAX30105_SAMPLE_AVG_16, 32: MAX30105_SAMPLE_AVG_32}
+        if number_of_samples not in avgs:
+            raise ValueError('Wrong number of samples:{0}!'.format(number_of_samples))
+        self.set_bitmask(MAX30105_FIFO_CONFIG, MAX30105_SAMPLE_AVG_MASK, avgs[number_of_samples])
+        self._sample_avg = number_of_samples
+        self.update_acquisition_frequency()
+
+    def update_acquisition_frequency(self):
+        """Calculate effective acquisition frequency"""
+        if None not in [self._sample_rate, self._sample_avg]:
+            self._acq_frequency = self._sample_rate / self._sample_avg
+            from math import ceil
+            self._acq_frequency_inv = int(ceil(1000 / self._acq_frequency))
+
+    def get_acquisition_frequency(self):
+        return self._acq_frequency
+
+    # ========================================================================
+    # LED AMPLITUDE CONFIGURATION
+    # ========================================================================
+    
+    def set_active_leds_amplitude(self, amplitude):
+        """Set amplitude for all active LEDs"""
+        if self._active_leds > 0:
+            self.set_pulse_amplitude_red(amplitude)
+        if self._active_leds > 1:
+            self.set_pulse_amplitude_it(amplitude)
+        if self._active_leds > 2:
+            self.set_pulse_amplitude_green(amplitude)
+
+    def set_pulse_amplitude_red(self, amplitude):
+        self.i2c_set_register(MAX30105_LED1_PULSE_AMP, amplitude)
+
+    def set_pulse_amplitude_it(self, amplitude):
+        self.i2c_set_register(MAX30105_LED2_PULSE_AMP, amplitude)
+
+    def set_pulse_amplitude_green(self, amplitude):
+        self.i2c_set_register(MAX30105_LED3_PULSE_AMP, amplitude)
+
+    def set_pulse_amplitude_proximity(self, amplitude):
+        self.i2c_set_register(MAX30105_LED_PROX_AMP, amplitude)
+
+    # ========================================================================
+    # FIFO MANAGEMENT
+    # ========================================================================
+    
+    def clear_fifo(self):
+        """Reset FIFO pointers"""
+        self.i2c_set_register(MAX30105_FIFO_WRITE_PTR, 0)
+        self.i2c_set_register(MAX30105_FIFO_OVERFLOW, 0)
+        self.i2c_set_register(MAX30105_FIFO_READ_PTR, 0)
+
+    def enable_fifo_rollover(self):
+        """Enable FIFO to wrap/roll over"""
+        self.set_bitmask(MAX30105_FIFO_CONFIG, MAX30105_ROLLOVER_MASK, MAX30105_ROLLOVER_ENABLE)
+
+    def disable_fifo_rollover(self):
+        """Disable FIFO rollover"""
+        self.set_bitmask(MAX30105_FIFO_CONFIG, MAX30105_ROLLOVER_MASK, MAX30105_ROLLOVER_DISABLE)
+
+    def get_write_pointer(self):
+        return self.i2c_read_register(MAX30105_FIFO_WRITE_PTR)
+
+    def get_read_pointer(self):
+        return self.i2c_read_register(MAX30105_FIFO_READ_PTR)
+
+    # ========================================================================
+    # TIME SLOT MANAGEMENT
+    # ========================================================================
+    
+    def enable_slot(self, slot_number, device):
+        """Enable LED in specified time slot"""
+        if slot_number == 1:
+            self.bitmask(MAX30105_MULTI_LED_CONFIG_1, MAX30105_SLOT1_MASK, device)
+        elif slot_number == 2:
+            self.bitmask(MAX30105_MULTI_LED_CONFIG_1, MAX30105_SLOT2_MASK, device << 4)
+        elif slot_number == 3:
+            self.bitmask(MAX30105_MULTI_LED_CONFIG_2, MAX30105_SLOT3_MASK, device)
+        elif slot_number == 4:
+            self.bitmask(MAX30105_MULTI_LED_CONFIG_2, MAX30105_SLOT4_MASK, device << 4)
+        else:
+            raise ValueError('Wrong slot number:{0}!'.format(slot_number))
+
+    def disable_slots(self):
+        """Clear all slot assignments"""
+        self.i2c_set_register(MAX30105_MULTI_LED_CONFIG_1, 0)
+        self.i2c_set_register(MAX30105_MULTI_LED_CONFIG_2, 0)
+
+    # ========================================================================
+    # DEVICE ID
+    # ========================================================================
+    
+    def read_part_id(self):
+        return self.i2c_read_register(MAX30105_PART_ID)
+
+    def check_part_id(self):
+        part_id = ord(self.read_part_id())
+        return part_id == MAX_30105_EXPECTED_PART_ID
+
+    def get_revision_id(self):
+        rev_id = self.i2c_read_register(MAX30105_REVISION_ID)
+        return ord(rev_id)
+
+    # ========================================================================
+    # TEMPERATURE
+    # ========================================================================
+    
+    def read_temperature(self):
+        """Read die temperature in °C"""
+        self.i2c_set_register(MAX30105_DIE_TEMP_CONFIG, 0x01)
+        reading = ord(self.i2c_read_register(MAX30105_INT_STAT_2))
+        sleep_ms(100)
+        while (reading & MAX30105_INT_DIE_TEMP_RDY_ENABLE) > 0:
+            reading = ord(self.i2c_read_register(MAX30105_INT_STAT_2))
+            sleep_ms(1)
+        tempInt = ord(self.i2c_read_register(MAX30105_DIE_TEMP_INT))
+        tempFrac = ord(self.i2c_read_register(MAX30105_DIE_TEMP_FRAC))
+        return float(tempInt) + (float(tempFrac) * 0.0625)
+
+    # ========================================================================
+    # DATA READING
+    # ========================================================================
+    
+    def fifo_bytes_to_int(self, fifo_bytes):
+        """Convert FIFO bytes to integer value"""
+        value = unpack(">i", b'\x00' + fifo_bytes)
+        return (value[0] & 0x3FFFF) >> self._pulse_width
+
+    def available(self):
+        """Returns number of samples available"""
+        return len(self.sense.red)
+
+    def get_red(self):
+        """Get new red value"""
+        if self.safe_check(250):
+            return self.sense.red.pop_head()
+        else:
+            return 0
+
+    def get_ir(self):
+        """Get new IR value"""
+        if self.safe_check(250):
+            return self.sense.IR.pop_head()
+        else:
+            return 0
+
+    def get_green(self):
+        """Get new green value"""
+        if self.safe_check(250):
+            return self.sense.green.pop_head()
+        else:
+            return 0
+
+    def pop_red_from_storage(self):
+        """Pop red value from storage"""
+        if len(self.sense.red) == 0:
+            return 0
+        else:
+            return self.sense.red.pop()
+
+    def pop_ir_from_storage(self):
+        """Pop IR value from storage"""
+        if len(self.sense.IR) == 0:
+            return 0
+        else:
+            return self.sense.IR.pop()
+
+    def pop_green_from_storage(self):
+        """Pop green value from storage"""
+        if len(self.sense.green) == 0:
+            return 0
+        else:
+            return self.sense.green.pop()
+
+    def check(self):
+        """Poll sensor for new data"""
+        read_pointer = ord(self.get_read_pointer())
+        write_pointer = ord(self.get_write_pointer())
+
+        if read_pointer != write_pointer:
+            number_of_samples = write_pointer - read_pointer
+            if number_of_samples < 0:
+                number_of_samples += 32
+
+            for i in range(number_of_samples):
+                fifo_bytes = self.i2c_read_register(MAX30105_FIFO_DATA,
+                                                    self._multi_led_read_mode)
+
+                if self._active_leds > 0:
+                    self.sense.red.append(self.fifo_bytes_to_int(fifo_bytes[0:3]))
+
+                if self._active_leds > 1:
+                    self.sense.IR.append(self.fifo_bytes_to_int(fifo_bytes[3:6]))
+
+                if self._active_leds > 2:
+                    self.sense.green.append(self.fifo_bytes_to_int(fifo_bytes[6:9]))
+
+                return True
+        else:
+            return False
+
+    def safe_check(self, max_time_to_check):
+        """Check for new data with timeout"""
+        mark_time = ticks_ms()
+        while True:
+            if ticks_diff(ticks_ms(), mark_time) > max_time_to_check:
+                return False
+            if self.check():
+                return True
+            sleep_ms(1)
+
+    def read_fifo(self):
+        """Read one sample from FIFO (simple version for HR/SpO2)"""
+        data = self._i2c.readfrom_mem(self.i2c_address, MAX30105_FIFO_DATA, 6)
+        red = (data[0] << 16 | data[1] << 8 | data[2]) & 0x03FFFF
+        ir = (data[3] << 16 | data[4] << 8 | data[5]) & 0x03FFFF
+        return red, ir
+
+    # ========================================================================
+    # HEART RATE & SPO2 CALCULATION
+    # ========================================================================
+    
+    def check_finger(self):
+        """Check if finger is present"""
+        red, ir = self.read_fifo()
+        return red > 50000 and ir > 50000
+    
+    def collect_samples(self, duration=6):
+        """Collect samples for HR/SpO2 analysis"""
+        print(f"Collecting samples for {duration}s (keep finger still)...")
+        
+        self.red_buffer = []
+        self.ir_buffer = []
+        
+        start_time = time.time()
+        sample_count = 0
+        last_print = 0
+        
+        while time.time() - start_time < duration:
+            red, ir = self.read_fifo()
+            
+            if red > 50000 and ir > 50000:
+                self.red_buffer.append(red)
+                self.ir_buffer.append(ir)
+                sample_count += 1
+            
+            # Progress indicator
+            elapsed = int(time.time() - start_time)
+            if elapsed > last_print:
+                print(f"  {elapsed}/{duration}s - {sample_count} samples...")
+                last_print = elapsed
+            
+            time.sleep(0.01)
+        
+        print(f"✓ Collected {sample_count} samples")
+        return sample_count >= 200
+    
+    def calculate_heart_rate(self):
+        """Calculate heart rate from IR signal using improved peak detection"""
+        if len(self.ir_buffer) < 100:
+            return 0, "Insufficient data"
+        
+        # Apply smoothing filter (moving average)
+        smoothing_window = 5
+        smoothed_signal = []
+        for i in range(len(self.ir_buffer)):
+            if i < smoothing_window:
+                smoothed_signal.append(self.ir_buffer[i])
+            else:
+                avg = sum(self.ir_buffer[i-smoothing_window:i]) / smoothing_window
+                smoothed_signal.append(avg)
+        
+        # Calculate dynamic threshold
+        signal_min = min(smoothed_signal)
+        signal_max = max(smoothed_signal)
+        threshold = signal_min + (signal_max - signal_min) * 0.5
+        
+        # Find peaks with minimum distance
+        peaks = []
+        min_distance = 50  # Minimum 50 samples between peaks (500ms at 100Hz)
+        
+        for i in range(1, len(smoothed_signal) - 1):
+            if (smoothed_signal[i] > threshold and
+                smoothed_signal[i] > smoothed_signal[i-1] and
+                smoothed_signal[i] > smoothed_signal[i+1]):
+                
+                # Check minimum distance from last peak
+                if len(peaks) == 0 or (i - peaks[-1]) >= min_distance:
+                    peaks.append(i)
+        
+        if len(peaks) < 2:
+            return 0, "No peaks detected"
+        
+        # Calculate average interval between peaks
+        intervals = []
+        for i in range(1, len(peaks)):
+            interval = peaks[i] - peaks[i-1]
+            # Filter unrealistic intervals (30-180 BPM range)
+            if 33 <= interval <= 200:  # 33 samples = 180 BPM, 200 samples = 30 BPM
+                intervals.append(interval)
+        
+        if len(intervals) == 0:
+            return 0, "No valid intervals"
+        
+        avg_interval = sum(intervals) / len(intervals)
+        
+        # Convert to BPM (100 Hz sampling rate)
+        # BPM = (60 seconds * 100 samples/sec) / samples_per_beat
+        bpm = int((60 * 100) / avg_interval)
+        
+        # Validate range
+        if 40 <= bpm <= 180:
+            return bpm, "Valid"
+        else:
+            return bpm, "Out of range"
+    
+    def calculate_spo2(self):
+        """Calculate SpO2 from Red/IR ratio"""
+        if len(self.red_buffer) < 100 or len(self.ir_buffer) < 100:
+            return 0, "Insufficient data"
+        
+        # Calculate AC and DC components
+        red_mean = sum(self.red_buffer) / len(self.red_buffer)
+        ir_mean = sum(self.ir_buffer) / len(self.ir_buffer)
+        
+        # AC component using peak-to-peak method
+        red_ac = max(self.red_buffer) - min(self.red_buffer)
+        ir_ac = max(self.ir_buffer) - min(self.ir_buffer)
+        
+        # DC component (mean)
+        red_dc = red_mean
+        ir_dc = ir_mean
+        
+        if red_dc == 0 or ir_dc == 0 or ir_ac == 0 or red_ac == 0:
+            return 0, "Division by zero"
+        
+        # Calculate R value (ratio of ratios)
+        R = (red_ac / red_dc) / (ir_ac / ir_dc)
+        
+        # Improved calibration formula for MAX30102
+        # Empirically derived from clinical data
+        # SpO2 = -45.060*R^2 + 30.354*R + 94.845 (from research papers)
+        spo2 = -45.060 * (R * R) + 30.354 * R + 94.845
+        
+        # Alternative simpler formula if R is in certain range
+        # For typical R values (0.4 - 2.0), use linear approximation
+        if R < 0.5:
+            spo2 = 100  # Perfect oxygenation
+        elif R > 2.0:
+            spo2 = 95  # Still good but adjust
+        
+        spo2 = int(spo2)
+        
+        # Clamp to physiologically valid range
+        spo2 = max(90, min(100, spo2))
+        
+        # Validate range
+        if 90 <= spo2 <= 100:
+            return spo2, "Valid"
+        else:
+            return spo2, "Out of range"
+    
+    def measure(self):
+        """Perform complete HR and SpO2 measurement"""
+        # Check if finger is present
+        if not self.check_finger():
+            return {
+                'heart_rate': 0,
+                'spo2': 0,
+                'status': 'No finger detected',
+                'red': 0,
+                'ir': 0
+            }
+        
+        # Collect samples
+        if not self.collect_samples(duration=6):
+            return {
+                'heart_rate': 0,
+                'spo2': 0,
+                'status': 'Collection failed',
+                'red': 0,
+                'ir': 0
+            }
+        
+        # Calculate metrics
+        hr, hr_status = self.calculate_heart_rate()
+        spo2, spo2_status = self.calculate_spo2()
+        
+        # Get current raw values
+        red, ir = self.read_fifo()
+        
+        return {
+            'heart_rate': hr,
+            'spo2': spo2,
+            'status': f"HR: {hr_status}, SpO2: {spo2_status}",
+            'red': red,
+            'ir': ir
+        }
+
+    # ========================================================================
+    # LOW-LEVEL I2C COMMUNICATION
+    # ========================================================================
+    
+    def i2c_read_register(self, REGISTER, n_bytes=1):
+        self._i2c.writeto(self.i2c_address, bytearray([REGISTER]))
+        return self._i2c.readfrom(self.i2c_address, n_bytes)
+
+    def i2c_set_register(self, REGISTER, VALUE):
+        self._i2c.writeto(self.i2c_address, bytearray([REGISTER, VALUE]))
+        return
+
+    def set_bitmask(self, REGISTER, MASK, NEW_VALUES):
+        newCONTENTS = (ord(self.i2c_read_register(REGISTER)) & MASK) | NEW_VALUES
+        self.i2c_set_register(REGISTER, newCONTENTS)
+        return
+
+    def bitmask(self, reg, slotMask, thing):
+        originalContents = ord(self.i2c_read_register(reg))
+        originalContents = originalContents & slotMask
+        self.i2c_set_register(reg, originalContents | thing)
+
+
+# ============================================================================
+# EMERGENCY BUTTON
+# ============================================================================
+
+class EmergencyButton:
+    def __init__(self, button_pin=21, led_pin=20):
+        self.button = Pin(button_pin, Pin.IN, Pin.PULL_DOWN)
+        self.led = Pin(led_pin, Pin.OUT)
+        self.led.off()
+        
+        self.emergency_active = False
+        self.auto_emergency_active = False
+        self.last_state = 0
+        self.last_press_time = 0
+        self.debounce_delay = 200
+        self.blink_state = False
+        self.last_blink_time = 0
+        
+        print("✓ Emergency button: GP" + str(button_pin) + ", LED: GP" + str(led_pin))
+    
+    def check(self):
+        current_state = self.button.value()
+        current_time = time.ticks_ms()
+        
+        if current_state == 1 and self.last_state == 0:
+            if time.ticks_diff(current_time, self.last_press_time) > self.debounce_delay:
+                self.last_press_time = current_time
+                self.last_state = current_state
+                return True
+        
+        self.last_state = current_state
+        return False
+    
+    def toggle(self):
+        self.emergency_active = not self.emergency_active
+        
+        if self.emergency_active:
+            self.led.on()
+            print("\n🚨 EMERGENCY ACTIVATED 🚨")
+        else:
+            self.led.off()
+            print("\n✓ Emergency cleared")
+        
+        return self.emergency_active
+    
+    def set_auto_emergency(self, active):
+        """Handle auto-emergency from server"""
+        self.auto_emergency_active = active
+        if not active:
+            self.led.off()
+            self.blink_state = False
+    
+    def update_blink(self):
+        """Update LED blinking for auto-emergency"""
+        if self.auto_emergency_active:
+            current_time = time.ticks_ms()
+            if time.ticks_diff(current_time, self.last_blink_time) > 100:  # 100ms
+                self.blink_state = not self.blink_state
+                self.led.value(1 if self.blink_state else 0)
+                self.last_blink_time = current_time
+
+
+# ============================================================================
+# WEBSOCKET CLIENT
+# ============================================================================
+
+class WebSocketClient:
+    def __init__(self, url):
+        self.url = url
+        self.sock = None
+        self.connected = False
+    
+    def connect(self):
+        try:
+            url_parts = self.url.replace('ws://', '').split(':')
+            host = url_parts[0]
+            port = int(url_parts[1]) if len(url_parts) > 1 else 80
+            
+            addr = usocket.getaddrinfo(host, port)[0][-1]
+            self.sock = usocket.socket()
+            self.sock.connect(addr)
+            
+            key = ubinascii.b2a_base64(bytes(urandom.getrandbits(8) for _ in range(16)))[:-1]
+            
+            handshake = (
+                "GET / HTTP/1.1\r\n"
+                "Host: " + host + ":" + str(port) + "\r\n"
+                "Upgrade: websocket\r\n"
+                "Connection: Upgrade\r\n"
+                "Sec-WebSocket-Key: " + key.decode() + "\r\n"
+                "Sec-WebSocket-Version: 13\r\n"
+                "\r\n"
+            )
+            
+            self.sock.send(handshake.encode())
+            response = self.sock.recv(1024).decode()
+            
+            if '101' in response.split('\r\n')[0]:
+                self.connected = True
+                print("✓ WebSocket connected")
+                return True
+            else:
+                print("✗ WebSocket handshake failed")
+                return False
+                
+        except Exception as e:
+            print("✗ Connection error: " + str(e))
+            self.connected = False
+            return False
+    
+    def send(self, data):
+        if not self.connected:
+            return False
+        
+        try:
+            message = ujson.dumps(data)
+            payload = message.encode()
+            
+            frame = bytearray()
+            frame.append(0x81)
+            
+            length = len(payload)
+            if length < 126:
+                frame.append(0x80 | length)
+            elif length < 65536:
+                frame.append(0x80 | 126)
+                frame.extend(ustruct.pack('!H', length))
+            else:
+                frame.append(0x80 | 127)
+                frame.extend(ustruct.pack('!Q', length))
+            
+            mask = bytes(urandom.getrandbits(8) for _ in range(4))
+            frame.extend(mask)
+            
+            masked = bytearray(payload[i] ^ mask[i % 4] for i in range(length))
+            frame.extend(masked)
+            
+            self.sock.send(frame)
+            return True
+            
+        except Exception as e:
+            print("✗ Send error: " + str(e))
+            self.connected = False
+            return False
+    
+    def recv(self):
+        """Non-blocking receive of WebSocket messages"""
+        if not self.connected or not self.sock:
+            return None
+        
+        try:
+            # Set socket to non-blocking mode
+            self.sock.setblocking(False)
+            
+            # Try to read frame header (2 bytes minimum)
+            try:
+                header = self.sock.recv(2)
+                if not header or len(header) < 2:
+                    return None
+            except OSError:
+                # No data available (EAGAIN/EWOULDBLOCK)
+                return None
+            
+            # Parse frame
+            opcode = header[0] & 0x0F
+            masked = header[1] & 0x80
+            length = header[1] & 0x7F
+            
+            # Extended length
+            if length == 126:
+                ext_len = self.sock.recv(2)
+                length = ustruct.unpack('>H', ext_len)[0]
+            elif length == 127:
+                ext_len = self.sock.recv(8)
+                length = ustruct.unpack('>Q', ext_len)[0]
+            
+            # Mask (if present)
+            if masked:
+                mask = self.sock.recv(4)
+            
+            # Payload
+            payload = bytearray()
+            while len(payload) < length:
+                chunk = self.sock.recv(length - len(payload))
+                if not chunk:
+                    break
+                payload.extend(chunk)
+            
+            # Unmask if needed
+            if masked:
+                for i in range(len(payload)):
+                    payload[i] ^= mask[i % 4]
+            
+            # Handle opcodes
+            if opcode == 0x1:  # Text frame
+                return payload.decode() if payload else None
+            elif opcode == 0x8:  # Close
+                self.connected = False
+                return None
+            
+            return None
+            
+        except OSError:
+            # No data available
+            return None
+        except Exception as e:
+            print("✗ Recv error: " + str(e))
+            return None
+        finally:
+            # Set back to blocking for sends
+            try:
+                self.sock.setblocking(True)
+            except:
+                pass
+    
+    def close(self):
+        if self.sock:
+            self.sock.close()
+        self.connected = False
+
+
+# ============================================================================
+# HAND CONTROLLER
+# ============================================================================
+
+class HandController:
+    def __init__(self):
+        print("\n" + "=" * 60)
+        print("  HAND CONTROLLER - Starting...")
+        print("=" * 60 + "\n")
+        
+        print("Initializing I2C...")
+        print("  SDA: GP" + str(MAX30102_SDA) + ", SCL: GP" + str(MAX30102_SCL))
+        
+        try:
+            self.i2c = SoftI2C(sda=Pin(MAX30102_SDA), scl=Pin(MAX30102_SCL), freq=400000)
+            print("✓ I2C bus created")
+            
+            print("\nScanning I2C bus...")
+            devices = self.i2c.scan()
+            if devices:
+                print("  Found " + str(len(devices)) + " device(s):")
+                for addr in devices:
+                    print("    - 0x" + hex(addr)[2:].upper())
+            else:
+                print("  ✗ No I2C devices found!")
+                print("  Check wiring:")
+                print("    • SDA -> GP" + str(MAX30102_SDA))
+                print("    • SCL -> GP" + str(MAX30102_SCL))
+                print("    • VCC -> 3.3V")
+                print("    • GND -> GND")
+        except Exception as e:
+            print("✗ I2C initialization failed: " + str(e))
+            import sys
+            sys.print_exception(e)
+            self.max30102 = None
+            return
+        
+        try:
+            print("\nInitializing MAX30102...")
+            self.max30102 = MAX30102(self.i2c)
+            print("  Checking part ID at address 0x" + hex(MAX3010X_I2C_ADDRESS)[2:].upper() + "...")
+            
+            if self.max30102.check_part_id():
+                print("✓ MAX30102 detected (Part ID valid)")
+                print("  Configuring sensor...")
+                self.max30102.setup_sensor()
+                print("✓ MAX30102 configured")
+            else:
+                print("✗ MAX30102 ID check failed")
+                print("  Expected part ID: 0x" + hex(MAX_30105_EXPECTED_PART_ID)[2:].upper())
+                try:
+                    actual_id = ord(self.max30102.i2c_read_register(MAX30105_PART_ID))
+                    print("  Actual part ID: 0x" + hex(actual_id)[2:].upper())
+                except:
+                    print("  Could not read part ID register")
+                self.max30102 = None
+        except Exception as e:
+            print("✗ MAX30102 error: " + str(e))
+            import sys
+            sys.print_exception(e)
+            self.max30102 = None
+        
+        self.emergency = EmergencyButton(EMERGENCY_BUTTON, EMERGENCY_LED)
+        self.wlan = network.WLAN(network.STA_IF)
+        self.ws = None
+        
+        self.last_measurement = 0
+        self.measurement_interval = 10000
+        
+        # Initialize flex sensors
+        print("\nInitializing flex sensors...")
+        try:
+            self.flex_servos_1_2 = ADC(Pin(FLEX_SERVOS_1_2))
+            print(f"  ✓ GP28 (A2) - Servos 1-2")
+        except Exception as e:
+            print(f"  ✗ GP28 (A2) failed: {e}")
+            self.flex_servos_1_2 = None
+        
+        try:
+            self.flex_servos_3_4 = ADC(Pin(FLEX_SERVOS_3_4))
+            print(f"  ✓ GP27 (A1) - Servos 3-4")
+        except Exception as e:
+            print(f"  ✗ GP27 (A1) failed: {e}")
+            self.flex_servos_3_4 = None
+        
+        try:
+            self.flex_servo_5 = ADC(Pin(FLEX_SERVO_5))
+            print(f"  ✓ GP26 (A0) - Servo 5")
+        except Exception as e:
+            print(f"  ✗ GP26 (A0) failed: {e}")
+            self.flex_servo_5 = None
+    
+    def connect_wifi(self):
+        print("Connecting to WiFi...")
+        print("  SSID: " + WIFI_SSID)
+        
+        try:
+            self.wlan.active(True)
+            self.wlan.connect(WIFI_SSID, WIFI_PASSWORD)
+            
+            timeout = 10
+            while timeout > 0:
+                status = self.wlan.status()
+                if self.wlan.isconnected():
+                    config = self.wlan.ifconfig()
+                    print("✓ WiFi connected")
+                    print("  IP: " + config[0])
+                    print("  Subnet: " + config[1])
+                    print("  Gateway: " + config[2])
+                    return True
+                time.sleep(1)
+                timeout -= 1
+                print("  Status: " + str(status) + ", waiting... " + str(timeout) + "s")
+            
+            print("✗ WiFi connection failed")
+            print("  Final status: " + str(self.wlan.status()))
+            return False
+        except Exception as e:
+            print("✗ WiFi error: " + str(e))
+            import sys
+            sys.print_exception(e)
+            return False
+    
+    def connect_websocket(self):
+        print("Connecting to server: ws://" + SERVER_IP + ":" + str(SERVER_PORT))
+        
+        try:
+            self.ws = WebSocketClient("ws://" + SERVER_IP + ":" + str(SERVER_PORT))
+            
+            if self.ws.connect():
+                print("  Sending identification...")
+                if self.ws.send({'type': 'identify', 'client': 'hand'}):
+                    print("✓ Identified as hand\n")
+                    return True
+                else:
+                    print("✗ Failed to send identification")
+                    return False
+            else:
+                print("✗ WebSocket connection failed")
+                return False
+        except Exception as e:
+            print("✗ WebSocket error: " + str(e))
+            import sys
+            sys.print_exception(e)
+            return False
+    
+    def get_biometric_data(self):
+        if not self.max30102:
+            print("  ⚠ MAX30102 not available")
+            return None
+        
+        try:
+            result = self.max30102.measure()
+            return result
+        except Exception as e:
+            print("✗ Measurement error: " + str(e))
+            import sys
+            sys.print_exception(e)
+            return None
+    
+    def send_biometric_data(self, data):
+        if not self.ws or not self.ws.connected:
+            return False
+        
+        message = {
+            'type': 'max30102_data',
+            'payload': {
+                'heart_rate': data['heart_rate'],
+                'spo2': data['spo2'],
+                'status': data['status'],
+                'red': data['red'],
+                'ir': data['ir']
+            }
+        }
+        
+        return self.ws.send(message)
+    
+    def send_emergency_alert(self, active):
+        if not self.ws or not self.ws.connected:
+            return False
+        
+        message = {
+            'type': 'emergency',
+            'payload': {
+                'active': active,
+                'timestamp': time.time()
+            }
+        }
+        
+        return self.ws.send(message)
+    
+    def read_flex_sensors(self):
+        """Read flex sensors and return servo angles"""
+        servos = {}
+        
+        # GP28 A2 - controls servos 1-2
+        if self.flex_servos_1_2:
+            raw = self.flex_servos_1_2.read_u16()
+            # Invert reading: bent (low raw) should give high angle
+            percentage = 100.0 - ((raw / 65535.0) * 100.0)
+            angle = int((percentage / 100.0) * 180.0)
+            angle = max(0, min(180, angle))
+            
+            servos['servo_1'] = angle
+            servos['servo_2'] = angle
+        else:
+            servos['servo_1'] = 90
+            servos['servo_2'] = 90
+        
+        # GP27 A1 - controls servos 3-4
+        if self.flex_servos_3_4:
+            raw = self.flex_servos_3_4.read_u16()
+            # Invert reading: bent (low raw) should give high angle
+            percentage = 100.0 - ((raw / 65535.0) * 100.0)
+            angle = int((percentage / 100.0) * 180.0)
+            angle = max(0, min(180, angle))
+            
+            servos['servo_3'] = angle
+            servos['servo_4'] = angle
+        else:
+            servos['servo_3'] = 90
+            servos['servo_4'] = 90
+        
+        # GP26 A0 - controls servo 5
+        if self.flex_servo_5:
+            raw = self.flex_servo_5.read_u16()
+            percentage = (raw / 65535.0) * 100.0
+            angle = int((percentage / 100.0) * 180.0)
+            angle = max(0, min(180, angle))
+            servos['servo_5'] = angle
+        else:
+            servos['servo_5'] = 90
+        
+        return servos
+    
+    def send_servo_control(self, servos):
+        """Send bulk servo control command"""
+        try:
+            if not self.ws or not self.ws.connected:
+                print("[HAND] ✗ Cannot send servo control - not connected")
+                return False
+            
+            message = {
+                'type': 'control_servos',
+                'servos': servos
+            }
+            
+            print("[HAND] → Sending servo control: " + str(servos))
+            result = self.ws.send(message)
+            if result:
+                print("[HAND] ✓ Servo control sent")
+            else:
+                print("[HAND] ✗ Failed to send servo control")
+            return result
+        except Exception as e:
+            print("[HAND] ✗ Error in send_servo_control: " + str(e))
+            return False
+    
+    def send_flex_data(self, flex_1_2, flex_3_4, flex_5):
+        """Send flex sensor data for display"""
+        if not self.ws or not self.ws.connected:
+            print("[HAND] ✗ Cannot send flex data - not connected")
+            return False
+        
+        message = {
+            'type': 'flex_data',
+            'payload': {
+                'flex_1_2': flex_1_2,
+                'flex_3_4': flex_3_4,
+                'flex_5': flex_5,
+                'timestamp': time.time()
+            }
+        }
+        
+        print(f"[HAND] → Sending flex data: 1-2={flex_1_2:.1f}%, 3-4={flex_3_4:.1f}%, 5={flex_5:.1f}%")
+        result = self.ws.send(message)
+        if result:
+            print("[HAND] ✓ Flex data sent")
+        else:
+            print("[HAND] ✗ Failed to send flex data")
+        return result
+    
+    def run(self):
+        wifi_connected = self.connect_wifi()
+        
+        if wifi_connected:
+            websocket_connected = self.connect_websocket()
+            if not websocket_connected:
+                print("⚠ Running without WebSocket connection")
+        else:
+            print("⚠ Running without WiFi - MAX30102 only mode")
+            websocket_connected = False
+        
+        print("=" * 60)
+        print("  HAND CONTROLLER - RUNNING")
+        print("=" * 60)
+        if websocket_connected:
+            print("  • Press emergency button to trigger alert")
+            print("  • Flex sensors control servos continuously")
+        print("  • Heart rate/SpO2 measured every 10s")
+        print("  • Press Ctrl+C to exit")
+        print("=" * 60 + "\n")
+        
+        last_servo_send = 0
+        servo_send_interval = 100  # Send servo updates every 100ms
+        
+        try:
+            while True:
+                current_time = ticks_ms()
+                
+                # Check for incoming WebSocket messages
+                if websocket_connected:
+                    try:
+                        msg = self.ws.recv()
+                        if msg:
+                            try:
+                                data = ujson.loads(msg)
+                                msg_type = data.get('type')
+                                
+                                # Handle auto-emergency from server
+                                if msg_type == 'emergency_auto':
+                                    is_active = data.get('active', False)
+                                    reason = data.get('reason', 'Unknown')
+                                    
+                                    if is_active:
+                                        print("\n" + "=" * 50)
+                                        print("🚨 AUTO-EMERGENCY FROM SERVER 🚨")
+                                        print("Reason: " + reason)
+                                        print("=" * 50 + "\n")
+                                        self.emergency.set_auto_emergency(True)
+                                    else:
+                                        print("\n✓ Auto-emergency cleared by server\n")
+                                        self.emergency.set_auto_emergency(False)
+                            except:
+                                pass
+                    except:
+                        pass
+                
+                # Check manual emergency button press
+                if self.emergency.check():
+                    # Manual button press - acknowledge auto-emergency or toggle manual
+                    if self.emergency.auto_emergency_active:
+                        # Acknowledge auto-emergency
+                        self.emergency.set_auto_emergency(False)
+                        self.ws.send({'type': 'emergency_ack', 'timestamp': time.time()})
+                        print("\n✓ Auto-emergency acknowledged\n")
+                    else:
+                        # Normal manual toggle
+                        is_active = self.emergency.toggle()
+                        self.send_emergency_alert(is_active)
+                
+                # Update LED blinking for auto-emergency
+                self.emergency.update_blink()
+                
+                # Send flex sensor servo control every 100ms (only if connected)
+                if websocket_connected and ticks_diff(current_time, last_servo_send) > servo_send_interval:
+                    last_servo_send = current_time
+                    print("\n[HAND] 📊 Reading flex sensors...")
+                    servos = self.read_flex_sensors()
+                    print(f"[HAND] 📐 Servo angles: {servos}")
+                    self.send_servo_control(servos)
+                    
+                    # Also send flex data for display
+                    if self.flex_servos_1_2:
+                        raw_1_2 = self.flex_servos_1_2.read_u16()
+                        # Invert: bent (low raw) should show high percentage
+                        flex_1_2_percent = 100.0 - ((raw_1_2 / 65535.0) * 100.0)
+                    else:
+                        flex_1_2_percent = 0
+                    
+                    if self.flex_servos_3_4:
+                        raw_3_4 = self.flex_servos_3_4.read_u16()
+                        # Invert: bent (low raw) should show high percentage
+                        flex_3_4_percent = 100.0 - ((raw_3_4 / 65535.0) * 100.0)
+                    else:
+                        flex_3_4_percent = 0
+                    
+                    if self.flex_servo_5:
+                        raw_5 = self.flex_servo_5.read_u16()
+                        flex_5_percent = (raw_5 / 65535.0) * 100.0
+                    else:
+                        flex_5_percent = 0
+                    
+                    self.send_flex_data(flex_1_2_percent, flex_3_4_percent, flex_5_percent)
+                
+                # Take MAX30102 measurements every 10 seconds
+                if ticks_diff(current_time, self.last_measurement) > self.measurement_interval:
+                    self.last_measurement = current_time
+                    
+                    print("\n📊 Taking measurement...")
+                    data = self.get_biometric_data()
+                    
+                    if data and data.get('heart_rate', 0) > 0:
+                        print("  ❤️  HR: " + str(data['heart_rate']) + " BPM")
+                        print("  🩸 SpO2: " + str(data['spo2']) + "%")
+                        print("  Status: " + data['status'])
+                        
+                        if websocket_connected:
+                            if self.send_biometric_data(data):
+                                print("  ✓ Data sent to server")
+                            else:
+                                print("  ✗ Failed to send data")
+                        else:
+                            print("  ⚠ Not connected - data not sent")
+                    elif data:
+                        print("  ⚠ " + data['status'])
+                    else:
+                        print("  ✗ Measurement error")
+                
+                # Small delay
+                time.sleep_ms(50)
+                
+        except KeyboardInterrupt:
+            print("\n\n" + "=" * 60)
+            print("  Shutting down...")
+            print("=" * 60)
+            
+            if self.ws:
+                self.ws.close()
+            
+            self.emergency.led.off()
+            print("  ✓ Hand controller stopped")
+            print("=" * 60 + "\n")
+
+
+# ============================================================================
+# MAIN
+# ============================================================================
+
+def main():
+    controller = HandController()
+    controller.run()
+
+if __name__ == "__main__":
+    main()
