@@ -337,9 +337,6 @@
           <button id="muteAlertsBtn" onclick="toggleAlertMute()" style="margin-left: 20px; padding: 8px 16px; background: #f39c12; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">
             🔊 Alerts On
           </button>
-          <button id="emergencyTriggerBtn" onclick="triggerEmergency()" style="margin-left: 10px; padding: 8px 16px; background: #e74c3c; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">
-            🚨 TRIGGER EMERGENCY
-          </button>
         </div>
       </header>
 
@@ -424,9 +421,9 @@
                   <span class="ml-indicator actual" id="hrIndicator"></span>
                   <span class="value" id="heartRate">--</span>
                 </div>
-                <div class="ml-prediction" id="hrPrediction" style="display: none;">
+                <!-- <div class="ml-prediction" id="hrPrediction" style="display: none;">
                   <span>AI: <span id="hrPredValue">--</span> <span class="confidence-range" id="hrConfidence"></span></span>
-                </div>
+                </div> -->
               </div>
             </div>
             <div class="data-row">
@@ -436,20 +433,20 @@
                   <span class="ml-indicator actual" id="spo2Indicator"></span>
                   <span class="value" id="spo2">--</span>
                 </div>
-                <div class="ml-prediction" id="spo2Prediction" style="display: none;">
+                <!-- <div class="ml-prediction" id="spo2Prediction" style="display: none;">
                   <span>AI: <span id="spo2PredValue">--</span> <span class="confidence-range" id="spo2Confidence"></span></span>
-                </div>
+                </div> -->
               </div>
             </div>
             <div class="data-row">
               <span class="label">Status:</span>
               <span class="value" id="maxStatus">--</span>
             </div>
-            <div class="data-row">
+            <div class="data-row" style="display:none;">
               <span class="label">Red LED:</span>
               <span class="value" id="maxRed">--</span>
             </div>
-            <div class="data-row">
+            <div class="data-row" style="display:none;">
               <span class="label">IR LED:</span>
               <span class="value" id="maxIR">--</span>
             </div>
@@ -529,7 +526,7 @@
             <div
               style="
                 display: grid;
-                grid-template-columns: repeat(3, 1fr);
+                grid-template-columns: repeat(2, 1fr);
                 gap: 5px;
               "
             >
@@ -559,18 +556,24 @@
               >
                 90°
               </button>
+
+            </div>
+            <div style="margin-top: 15px; padding-top: 15px; border-top: 2px solid #f0f0f0;">
               <button
-                onclick="setServoAngle(180)"
+                onclick="showQuickMovements()"
                 style="
-                  padding: 8px;
-                  background: #667eea;
+                  width: 100%;
+                  padding: 12px;
+                  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                   color: white;
                   border: none;
                   border-radius: 5px;
                   cursor: pointer;
+                  font-weight: bold;
+                  font-size: 1em;
                 "
               >
-                180°
+                🎮 Quick Movements
               </button>
             </div>
           </div>
@@ -580,7 +583,7 @@
         <div class="card">
           <h2>💨 Gas Sensor</h2>
           <div id="gasData">
-            <div class="data-row">
+            <div class="data-row" style="display:none;">
               <span class="label">Raw Value:</span>
               <span class="value" id="gasRaw">--</span>
             </div>
@@ -672,6 +675,8 @@
     <script>
       let ws;
       let alertsMuted = false;
+      let currentWarningLevel = null;
+      let warningCheckInterval = null;
       const WS_URL = `ws://${window.location.hostname}:8081`;
 
       function toggleAlertMute() {
@@ -688,6 +693,29 @@
           btn.textContent = "🔊 Alerts On";
           btn.style.background = "#f39c12";
         }
+      }
+
+      function startWarningCheck() {
+        // Check warning status every 5 seconds
+        if (warningCheckInterval) {
+          clearInterval(warningCheckInterval);
+        }
+        
+        warningCheckInterval = setInterval(() => {
+          const warningSound = document.getElementById("warningSound");
+          const warningAlert = document.getElementById("warningAlert");
+          const criticalAlert = document.getElementById("criticalAlert");
+          
+          // If no warning/critical alert is visible, stop the warning sound
+          if (warningAlert.style.display === "none" && criticalAlert.style.display === "none") {
+            if (!warningSound.paused) {
+              warningSound.pause();
+              warningSound.currentTime = 0;
+              console.log("Warning sound stopped - no active warnings");
+            }
+            currentWarningLevel = null;
+          }
+        }, 5000); // Check every 5 seconds
       }
 
       function connectWebSocket() {
@@ -740,6 +768,25 @@
                   data.data.red || "--";
                 document.getElementById("maxIR").textContent =
                   data.data.ir || "--";
+              }
+            }
+
+            if (data.type === "emergency_status") {
+              // Handle global emergency status from server
+              if (data.active) {
+                if (data.manualTriggered) {
+                  handleManualEmergency(true);
+                } else if (data.autoTriggered) {
+                  handleAutoEmergency({
+                    active: true,
+                    reason: data.level,
+                    abnormal: data.triggeredBy
+                  });
+                }
+              } else {
+                // Clear both emergency displays
+                handleManualEmergency(false);
+                handleAutoEmergency({ active: false });
               }
             }
 
@@ -902,13 +949,13 @@
           const gas = mechData.gas;
           document.getElementById("gasRaw").textContent = gas.raw || "--";
           document.getElementById("gasPercentage").textContent = gas.percent
-            ? gas.percent.toFixed(2) + "%"
+            ? (gas.percent / 100).toFixed(2) + "%"
             : "--";
           document.getElementById("gasProgress").style.width =
             (gas.percent || 0) + "%";
           document.getElementById("gasAlert").textContent = gas.alert
             ? "⚠️ ALERT"
-            : "✓ Normal";
+            : "Normal";
           
           // Show actual data indicator
           document.getElementById("gasIndicator").classList.remove("predicted");
@@ -1015,6 +1062,9 @@
         const { level, abnormal } = data;
         const warningSound = document.getElementById("warningSound");
 
+        // Update current warning level
+        currentWarningLevel = level;
+
         // Hide all alerts first
         document.getElementById("warningAlert").style.display = "none";
         document.getElementById("criticalAlert").style.display = "none";
@@ -1024,6 +1074,7 @@
           if (!alertsMuted) {
             try {
               warningSound.currentTime = 0;
+              warningSound.loop = true; // Loop the warning sound
               const playPromise = warningSound.play();
               if (playPromise !== undefined) {
                 playPromise.catch(err => console.log("Warning sound play failed:", err));
@@ -1042,6 +1093,7 @@
           if (!alertsMuted) {
             try {
               warningSound.currentTime = 0;
+              warningSound.loop = true; // Loop the warning sound
               const playPromise = warningSound.play();
               if (playPromise !== undefined) {
                 playPromise.catch(err => console.log("Warning sound play failed:", err));
@@ -1059,6 +1111,9 @@
             list.appendChild(li);
           });
           document.getElementById("criticalAlert").style.display = "block";
+        } else {
+          // No warnings - clear current level
+          currentWarningLevel = null;
         }
       }
 
@@ -1223,8 +1278,145 @@
         }
       }
 
+      function showQuickMovements() {
+        const overrideCheckbox = document.getElementById("emergencyOverride");
+        const emergencyOverride = overrideCheckbox ? overrideCheckbox.checked : false;
+
+        const movements = `
+Choose a quick movement pattern:
+
+1. Wave - Alternate servos in a wave pattern
+2. Spread - Open all servos to 180°
+3. Close - Close all servos to 0°
+4. Center - Reset all servos to 90°
+5. Dance - Random movement sequence
+6. Sequential - Move servos one by one 0°→180°
+
+Enter 1-6:`;
+
+        const choice = prompt(movements);
+        
+        if (!choice || !ws || ws.readyState !== WebSocket.OPEN) {
+          if (choice) alert("Not connected to server");
+          return;
+        }
+
+        switch(choice) {
+          case '1': // Wave
+            executeWave(emergencyOverride);
+            break;
+          case '2': // Spread
+            setAllServos(180, emergencyOverride);
+            break;
+          case '3': // Close
+            setAllServos(0, emergencyOverride);
+            break;
+          case '4': // Center
+            setAllServos(90, emergencyOverride);
+            break;
+          case '5': // Dance
+            executeDance(emergencyOverride);
+            break;
+          case '6': // Sequential
+            executeSequential(emergencyOverride);
+            break;
+          default:
+            alert("Invalid choice");
+        }
+      }
+
+      function setAllServos(angle, emergencyOverride) {
+        ws.send(JSON.stringify({
+          type: "control_servos",
+          servos: {
+            servo_1: angle,
+            servo_2: angle,
+            servo_3: angle,
+            servo_4: angle,
+            servo_5: angle,
+          },
+          emergencyOverride: emergencyOverride,
+        }));
+        console.log(`Quick movement: All servos to ${angle}°`);
+      }
+
+      function executeWave(emergencyOverride) {
+        const pattern = [
+          { servo_1: 0, servo_2: 180, servo_3: 0, servo_4: 180, servo_5: 0 },
+          { servo_1: 180, servo_2: 0, servo_3: 180, servo_4: 0, servo_5: 180 },
+          { servo_1: 0, servo_2: 180, servo_3: 0, servo_4: 180, servo_5: 0 },
+          { servo_1: 90, servo_2: 90, servo_3: 90, servo_4: 90, servo_5: 90 }
+        ];
+        
+        let step = 0;
+        const interval = setInterval(() => {
+          if (step >= pattern.length) {
+            clearInterval(interval);
+            return;
+          }
+          ws.send(JSON.stringify({
+            type: "control_servos",
+            servos: pattern[step],
+            emergencyOverride: emergencyOverride,
+          }));
+          step++;
+        }, 500);
+        console.log("Quick movement: Wave pattern");
+      }
+
+      function executeDance(emergencyOverride) {
+        const steps = 8;
+        let step = 0;
+        const interval = setInterval(() => {
+          if (step >= steps) {
+            clearInterval(interval);
+            setAllServos(90, emergencyOverride); // Reset to center
+            return;
+          }
+          const servos = {
+            servo_1: Math.floor(Math.random() * 181),
+            servo_2: Math.floor(Math.random() * 181),
+            servo_3: Math.floor(Math.random() * 181),
+            servo_4: Math.floor(Math.random() * 181),
+            servo_5: Math.floor(Math.random() * 181),
+          };
+          ws.send(JSON.stringify({
+            type: "control_servos",
+            servos: servos,
+            emergencyOverride: emergencyOverride,
+          }));
+          step++;
+        }, 400);
+        console.log("Quick movement: Dance pattern");
+      }
+
+      function executeSequential(emergencyOverride) {
+        const servos = ['servo_1', 'servo_2', 'servo_3', 'servo_4', 'servo_5'];
+        let step = 0;
+        const interval = setInterval(() => {
+          if (step >= servos.length * 2) {
+            clearInterval(interval);
+            return;
+          }
+          const servoIndex = Math.floor(step / 2);
+          const angle = step % 2 === 0 ? 0 : 180;
+          
+          ws.send(JSON.stringify({
+            type: "control_servo",
+            servo: servos[servoIndex],
+            angle: angle,
+            emergencyOverride: emergencyOverride,
+          }));
+          step++;
+        }, 600);
+        console.log("Quick movement: Sequential pattern");
+      }
+
       // Connect when page loads
       connectWebSocket();
+      
+      // Start warning status check
+      startWarningCheck();
     </script>
   </body>
 </html>

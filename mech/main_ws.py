@@ -454,6 +454,17 @@ class MechController:
         
         # Emergency lock state
         self.emergency_lock = False
+        self.emergency_led = None
+        self.emergency_led_blink_state = False
+        self.emergency_led_last_blink = 0
+        
+        # Try to initialize emergency LED on GP17 (or any available pin)
+        try:
+            self.emergency_led = Pin(17, Pin.OUT)
+            self.emergency_led.value(0)
+            print("✓ Emergency LED initialized on GP17")
+        except:
+            print("⚠ No emergency LED available")
     
     def get_sensor_data(self):
         """Collect all sensor readings"""
@@ -525,23 +536,28 @@ class MechController:
                     override_msg = " [OVERRIDE]" if emergency_override else ""
                     print(f"Bulk control: {servo_angles}{override_msg}")
             
-            elif msg_type == 'emergency_alert':
+            elif msg_type == 'emergency_status' or msg_type == 'emergency_alert':
                 active = data.get('active')
                 
                 if active:
-                    # Emergency activated - stop all servos
-                    self.emergency_lock = True
-                    if self.servos:
-                        self.servos.set_all_angles(90)
-                    print("\n" + "="*50)
-                    print("🚨 EMERGENCY ACTIVATED - SERVOS LOCKED AT 90° 🚨")
-                    print("="*50 + "\n")
+                    # Emergency activated - stop all servos and start LED blinking
+                    if not self.emergency_lock:
+                        self.emergency_lock = True
+                        if self.servos:
+                            self.servos.set_all_angles(90)
+                        print("\n" + "="*50)
+                        print("🚨 EMERGENCY ACTIVATED - SERVOS LOCKED AT 90° 🚨")
+                        print("="*50 + "\n")
                 else:
-                    # Emergency deactivated - resume normal operation
-                    self.emergency_lock = False
-                    print("\n" + "="*50)
-                    print("✓ EMERGENCY CLEARED - SERVOS UNLOCKED")
-                    print("="*50 + "\n")
+                    # Emergency deactivated - resume normal operation and turn off LED
+                    if self.emergency_lock:
+                        self.emergency_lock = False
+                        if self.emergency_led:
+                            self.emergency_led.value(0)
+                            self.emergency_led_blink_state = False
+                        print("\n" + "="*50)
+                        print("✓ EMERGENCY CLEARED - SERVOS UNLOCKED")
+                        print("="*50 + "\n")
         
         except Exception as e:
             print(f"Message handler error: {e}")
@@ -587,6 +603,14 @@ class MechController:
                         except Exception as e:
                             print(f"Send error: {e}")
                             raise
+                    
+                    # Update emergency LED blinking
+                    if self.emergency_lock and self.emergency_led:
+                        current_ms = int(time.time() * 1000)
+                        if current_ms - self.emergency_led_last_blink > 100:
+                            self.emergency_led_blink_state = not self.emergency_led_blink_state
+                            self.emergency_led.value(1 if self.emergency_led_blink_state else 0)
+                            self.emergency_led_last_blink = current_ms
                     
                     # Check for incoming messages
                     try:

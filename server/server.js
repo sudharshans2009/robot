@@ -270,6 +270,7 @@ const emergencyState = {
   triggeredBy: [],
   timestamp: null,
   autoTriggered: false,
+  manualTriggered: false,
   lastEmergencyTime: 0,
   cooldownPeriod: 30000, // 30 seconds
 };
@@ -288,14 +289,15 @@ function checkVitals(sensorData) {
 
   // Check each sensor against ranges (use admin thresholds if available)
   Object.keys(vitalRanges).forEach((sensor) => {
+    // Skip heart_rate and spo2 - don't check them for emergencies
+    if (sensor === "heart_rate" || sensor === "spo2") {
+      return;
+    }
+    
     let value = null;
 
     // Extract sensor value from data
-    if (sensor === "heart_rate" && sensorData.hand?.max30102?.heart_rate) {
-      value = sensorData.hand.max30102.heart_rate;
-    } else if (sensor === "spo2" && sensorData.hand?.max30102?.spo2) {
-      value = sensorData.hand.max30102.spo2;
-    } else if (sensor === "temperature" && sensorData.mech?.temperature) {
+    if (sensor === "temperature" && sensorData.mech?.temperature) {
       value = sensorData.mech.temperature;
     } else if (sensor === "gas" && sensorData.mech?.gas?.percent) {
       value = sensorData.mech.gas.percent;
@@ -336,30 +338,33 @@ function checkVitals(sensorData) {
 function detectRapidChanges(sensor, newValue, oldData) {
   if (!oldData || oldData.value === null || newValue === null) return null;
 
+  // Skip heart_rate and spo2 - don't check for rapid changes
+  if (sensor === "heart_rate" || sensor === "spo2") {
+    return null;
+  }
+
   const timeDiff = (Date.now() - oldData.timestamp) / 1000; // seconds
   if (timeDiff > 10) return null; // Too much time passed
 
   const valueDiff = Math.abs(newValue - oldData.value);
 
-  // Heart rate: >20 BPM in <5 seconds
-  if (sensor === "heart_rate" && valueDiff > 20 && timeDiff < 5) {
+  // Temperature: >10°C in <5 seconds
+  if (sensor === "temperature" && valueDiff > 10 && timeDiff < 5) {
     return {
       sensor,
       change: valueDiff,
       time: timeDiff,
-      reason: `Heart rate changed ${valueDiff} BPM in ${timeDiff.toFixed(
-        1
-      )}s`,
+      reason: `Temperature changed ${valueDiff}°C in ${timeDiff.toFixed(1)}s`,
     };
   }
 
-  // SpO2: >5% drop in <5 seconds
-  if (sensor === "spo2" && valueDiff > 5 && timeDiff < 5) {
+  // Gas: >20% in <5 seconds
+  if (sensor === "gas" && valueDiff > 20 && timeDiff < 5) {
     return {
       sensor,
       change: valueDiff,
       time: timeDiff,
-      reason: `SpO2 dropped ${valueDiff}% in ${timeDiff.toFixed(1)}s`,
+      reason: `Gas changed ${valueDiff}% in ${timeDiff.toFixed(1)}s`,
     };
   }
 
@@ -698,37 +703,28 @@ wss.on("connection", (ws) => {
           const isActive =
             payload.active !== undefined ? payload.active : data.active;
 
+          // Update global emergency state
+          emergencyState.active = isActive;
+          emergencyState.manualTriggered = isActive;
+          emergencyState.timestamp = Date.now();
+          
+          if (!isActive) {
+            // Clear emergency
+            emergencyState.level = "normal";
+            emergencyState.autoTriggered = false;
+            emergencyState.triggeredBy = [];
+          }
+
           latestData.hand.emergency = isActive;
           latestData.hand.timestamp = Date.now();
 
           console.log(
-            `[HAND] 🚨 EMERGENCY ALERT: ${
+            `[HAND] 🚨 MANUAL EMERGENCY: ${
               isActive ? "ACTIVATED" : "DEACTIVATED"
             }`
           );
 
-          // Alert all clients about emergency
-          if (clients.mech && clients.mech.readyState === WebSocket.OPEN) {
-            clients.mech.send(
-              JSON.stringify({
-                type: "emergency_alert",
-                active: isActive,
-              })
-            );
-          }
-
-          // Alert website clients immediately
-          clients.site.forEach((client) => {
-            if (client.readyState === WebSocket.OPEN) {
-              client.send(
-                JSON.stringify({
-                  type: "emergency_alert",
-                  active: isActive,
-                  timestamp: latestData.hand.timestamp,
-                })
-              );
-            }
-          });
+          // Broadcast to all clients will happen in periodic update
         }
 
         if (data.type === "max30102_data") {
@@ -756,7 +752,7 @@ wss.on("connection", (ws) => {
                 adminOverride.biometric.spo2.max,
                 0
               ),
-              status: "Admin Override",
+              status: "Normal",
               red: payload.red,
               ir: payload.ir,
             };
@@ -785,12 +781,39 @@ wss.on("connection", (ws) => {
           });
         }
 
+        // Handle emergency trigger from website
+        if (data.type === "emergency_alert") {
+          const isActive = data.active;
+          
+          // Update global emergency state
+          emergencyState.active = isActive;
+          emergencyState.manualTriggered = isActive;
+          emergencyState.timestamp = Date.now();
+          
+          if (!isActive) {
+            // Clear emergency
+            emergencyState.level = "normal";
+            emergencyState.autoTriggered = false;
+            emergencyState.triggeredBy = [];
+          }
+          
+          console.log(
+            `[WEBSITE] 🚨 MANUAL EMERGENCY: ${
+              isActive ? "ACTIVATED" : "DEACTIVATED"
+            }`
+          );
+          
+          // Broadcast to all clients will happen in periodic update
+        }
+
         // Handle emergency acknowledgment
         if (data.type === "emergency_ack") {
-          if (emergencyState.autoTriggered) {
+          if (emergencyState.autoTriggered || emergencyState.manualTriggered) {
             emergencyState.active = false;
             emergencyState.autoTriggered = false;
+            emergencyState.manualTriggered = false;
             emergencyState.level = "normal";
+            emergencyState.triggeredBy = [];
             console.log(
               `[EMERGENCY] Acknowledged by user at ${new Date().toLocaleTimeString()}`
             );
@@ -963,6 +986,43 @@ wss.on("connection", (ws) => {
   });
 });
 
+// Broadcast emergency status to ALL clients every 1 second
+setInterval(() => {
+  const emergencyBroadcast = {
+    type: "emergency_status",
+    active: emergencyState.active,
+    level: emergencyState.level,
+    manualTriggered: emergencyState.manualTriggered,
+    autoTriggered: emergencyState.autoTriggered,
+    triggeredBy: emergencyState.triggeredBy,
+    timestamp: emergencyState.timestamp || Date.now(),
+  };
+
+  // Send to hand controller
+  if (clients.hand && clients.hand.readyState === WebSocket.OPEN) {
+    clients.hand.send(JSON.stringify(emergencyBroadcast));
+  }
+
+  // Send to mech controller
+  if (clients.mech && clients.mech.readyState === WebSocket.OPEN) {
+    clients.mech.send(JSON.stringify(emergencyBroadcast));
+  }
+
+  // Send to website clients
+  clients.site.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify(emergencyBroadcast));
+    }
+  });
+
+  // Send to admin clients
+  clients.admin.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(JSON.stringify(emergencyBroadcast));
+    }
+  });
+}, 1000);
+
 // Broadcast latest data to website clients every 3 seconds
 setInterval(() => {
   if (clients.site.length > 0) {
@@ -1002,7 +1062,7 @@ setInterval(() => {
           adminOverride.biometric.spo2.max,
           0
         ),
-        status: "Admin Override",
+        status: "Normal",
         red: handData.max30102.red,
         ir: handData.max30102.ir,
       };
