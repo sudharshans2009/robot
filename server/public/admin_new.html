@@ -1,0 +1,1136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Panel - Robot Control</title>
+  <style>
+    :root {
+      --primary: #6366f1;
+      --primary-dark: #4f46e5;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --bg: #0f172a;
+      --card: #1e293b;
+      --text: #e2e8f0;
+      --text-muted: #94a3b8;
+      --border: #334155;
+    }
+    
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 1rem;
+    }
+    
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    
+    header {
+      background: var(--card);
+      padding: 1rem 1.5rem;
+      border-radius: 0.75rem;
+      margin-bottom: 1.5rem;
+      border: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+    
+    header h1 {
+      font-size: 1.5rem;
+      color: var(--warning);
+    }
+    
+    .header-actions {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+    }
+    
+    .status-item {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(255,255,255,0.05);
+      padding: 0.5rem 1rem;
+      border-radius: 0.375rem;
+    }
+    
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #475569;
+    }
+    
+    .status-dot.connected {
+      background: var(--success);
+      box-shadow: 0 0 8px var(--success);
+    }
+    
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+      gap: 1.5rem;
+    }
+    
+    .panel {
+      background: var(--card);
+      border-radius: 0.75rem;
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+    
+    .panel-header {
+      padding: 1rem 1.25rem;
+      background: rgba(255,255,255,0.03);
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .panel-header h2 {
+      font-size: 1.125rem;
+      color: var(--primary);
+    }
+    
+    .panel-header .toggle {
+      color: var(--text-muted);
+      transition: transform 0.3s;
+    }
+    
+    .panel-header.collapsed .toggle {
+      transform: rotate(-90deg);
+    }
+    
+    .panel-content {
+      padding: 1.25rem;
+      transition: max-height 0.3s ease, opacity 0.3s ease;
+      overflow: hidden;
+    }
+    
+    .panel-content.collapsed {
+      max-height: 0 !important;
+      padding: 0 1.25rem;
+      opacity: 0;
+    }
+    
+    /* Form Controls */
+    .control-group {
+      margin-bottom: 1.25rem;
+    }
+    
+    .control-group:last-child {
+      margin-bottom: 0;
+    }
+    
+    label {
+      display: block;
+      margin-bottom: 0.5rem;
+      color: var(--text-muted);
+      font-size: 0.875rem;
+    }
+    
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem;
+      background: rgba(99, 102, 241, 0.1);
+      border: 1px solid rgba(99, 102, 241, 0.2);
+      border-radius: 0.5rem;
+      margin-bottom: 1rem;
+    }
+    
+    .checkbox-row.warning-style {
+      background: rgba(245, 158, 11, 0.1);
+      border-color: rgba(245, 158, 11, 0.3);
+    }
+    
+    .checkbox-row input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+    }
+    
+    .checkbox-row label {
+      margin: 0;
+      color: var(--text);
+      cursor: pointer;
+    }
+    
+    .range-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+    
+    .range-input {
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .range-input small {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      margin-bottom: 0.25rem;
+    }
+    
+    input[type="number"] {
+      width: 100%;
+      padding: 0.625rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 0.375rem;
+      color: var(--text);
+      font-size: 0.9375rem;
+    }
+    
+    input[type="number"]:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+    
+    .value-display {
+      text-align: center;
+      padding: 0.625rem;
+      background: rgba(99, 102, 241, 0.15);
+      border-radius: 0.375rem;
+      color: var(--primary);
+      font-weight: 600;
+      font-size: 0.9375rem;
+    }
+    
+    /* Buttons */
+    button {
+      padding: 0.625rem 1rem;
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 0.375rem;
+      cursor: pointer;
+      font-weight: 500;
+      font-size: 0.875rem;
+      transition: all 0.2s;
+    }
+    
+    button:hover {
+      background: var(--primary-dark);
+    }
+    
+    button.danger {
+      background: var(--danger);
+    }
+    
+    button.danger:hover {
+      background: #dc2626;
+    }
+    
+    button.success {
+      background: var(--success);
+    }
+    
+    button.success:hover {
+      background: #059669;
+    }
+    
+    button.warning {
+      background: var(--warning);
+    }
+    
+    button.warning:hover {
+      background: #d97706;
+    }
+    
+    .btn-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+    }
+    
+    .btn-group {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    
+    /* Sensor Override Section */
+    .sensor-section {
+      padding: 1rem;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      margin-bottom: 1rem;
+    }
+    
+    .sensor-section h4 {
+      font-size: 0.875rem;
+      color: var(--text);
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    
+    /* Threshold Grid */
+    .threshold-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.5rem;
+    }
+    
+    .threshold-grid small {
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.7rem;
+    }
+    
+    /* Activity Log */
+    .log-container {
+      max-height: 280px;
+      overflow-y: auto;
+      background: rgba(0,0,0,0.3);
+      border-radius: 0.375rem;
+      padding: 0.75rem;
+      font-family: 'Monaco', 'Consolas', monospace;
+      font-size: 0.8125rem;
+    }
+    
+    .log-entry {
+      padding: 0.375rem 0;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    
+    .log-entry:last-child {
+      border-bottom: none;
+    }
+    
+    .log-time {
+      color: var(--text-muted);
+      margin-right: 0.5rem;
+    }
+    
+    .log-msg {
+      color: var(--primary);
+    }
+    
+    .log-msg.danger {
+      color: var(--danger);
+    }
+    
+    .log-msg.success {
+      color: var(--success);
+    }
+    
+    .log-msg.warning {
+      color: var(--warning);
+    }
+    
+    /* Info Box */
+    .info-box {
+      padding: 0.75rem;
+      background: rgba(99, 102, 241, 0.1);
+      border-left: 3px solid var(--primary);
+      border-radius: 0.25rem;
+      margin-bottom: 1rem;
+      font-size: 0.875rem;
+      color: var(--text-muted);
+    }
+    
+    .danger-box {
+      padding: 0.75rem;
+      background: rgba(239, 68, 68, 0.1);
+      border-left: 3px solid var(--danger);
+      border-radius: 0.25rem;
+      margin-bottom: 1rem;
+      font-size: 0.875rem;
+    }
+    
+    footer {
+      text-align: center;
+      padding: 2rem 0 1rem;
+      color: var(--text-muted);
+      font-size: 0.875rem;
+    }
+    
+    footer a {
+      color: var(--primary);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🔧 Admin Control Panel</h1>
+      <div class="header-actions">
+        <div class="status-item">
+          <div class="status-dot" id="wsStatus"></div>
+          <span id="wsStatusText">Connecting...</span>
+        </div>
+        <button onclick="window.open('/', '_blank')" class="success">📊 Dashboard</button>
+        <button onclick="resetAll()" class="warning">🔄 Reset All</button>
+      </div>
+    </header>
+    
+    <div class="grid">
+      <!-- Flex Override -->
+      <div class="panel">
+        <div class="panel-header" onclick="togglePanel(this)">
+          <h2>🎮 Flex Sensor Override</h2>
+          <span class="toggle">▼</span>
+        </div>
+        <div class="panel-content">
+          <div class="checkbox-row">
+            <input type="checkbox" id="flexEnabled" onchange="updateOverride()">
+            <label for="flexEnabled">Enable Flex Override</label>
+          </div>
+          
+          <div class="checkbox-row warning-style">
+            <input type="checkbox" id="forwardServos" onchange="updateOverride()">
+            <label for="forwardServos">⚡ Forward Override to Servos</label>
+          </div>
+          
+          <!-- Flex 1-2 -->
+          <div class="sensor-section">
+            <h4>
+              <input type="checkbox" id="flex12Enabled" onchange="updateOverride()">
+              Servos 1-2 Range (%)
+            </h4>
+            <div class="range-row">
+              <div class="range-input">
+                <small>Min</small>
+                <input type="number" id="flex12Min" value="45" min="0" max="100" onchange="updateOverride()">
+              </div>
+              <div class="range-input">
+                <small>Max</small>
+                <input type="number" id="flex12Max" value="55" min="0" max="100" onchange="updateOverride()">
+              </div>
+            </div>
+            <div class="value-display" id="flex12Value">45 - 55%</div>
+            <div class="btn-grid">
+              <button onclick="setFlexPreset('flex_1_2', 0, 5)">Open</button>
+              <button onclick="setFlexPreset('flex_1_2', 45, 55)">Neutral</button>
+              <button onclick="setFlexPreset('flex_1_2', 95, 100)">Closed</button>
+            </div>
+          </div>
+          
+          <!-- Flex 3-4 -->
+          <div class="sensor-section">
+            <h4>
+              <input type="checkbox" id="flex34Enabled" onchange="updateOverride()">
+              Servos 3-4 Range (%)
+            </h4>
+            <div class="range-row">
+              <div class="range-input">
+                <small>Min</small>
+                <input type="number" id="flex34Min" value="45" min="0" max="100" onchange="updateOverride()">
+              </div>
+              <div class="range-input">
+                <small>Max</small>
+                <input type="number" id="flex34Max" value="55" min="0" max="100" onchange="updateOverride()">
+              </div>
+            </div>
+            <div class="value-display" id="flex34Value">45 - 55%</div>
+            <div class="btn-grid">
+              <button onclick="setFlexPreset('flex_3_4', 0, 5)">Open</button>
+              <button onclick="setFlexPreset('flex_3_4', 45, 55)">Neutral</button>
+              <button onclick="setFlexPreset('flex_3_4', 95, 100)">Closed</button>
+            </div>
+          </div>
+          
+          <!-- Flex 5 -->
+          <div class="sensor-section">
+            <h4>
+              <input type="checkbox" id="flex5Enabled" onchange="updateOverride()">
+              Servo 5 Range (%)
+            </h4>
+            <div class="range-row">
+              <div class="range-input">
+                <small>Min</small>
+                <input type="number" id="flex5Min" value="45" min="0" max="100" onchange="updateOverride()">
+              </div>
+              <div class="range-input">
+                <small>Max</small>
+                <input type="number" id="flex5Max" value="55" min="0" max="100" onchange="updateOverride()">
+              </div>
+            </div>
+            <div class="value-display" id="flex5Value">45 - 55%</div>
+            <div class="btn-grid">
+              <button onclick="setFlexPreset('flex_5', 0, 5)">Open</button>
+              <button onclick="setFlexPreset('flex_5', 45, 55)">Neutral</button>
+              <button onclick="setFlexPreset('flex_5', 95, 100)">Closed</button>
+            </div>
+          </div>
+          
+          <div class="btn-grid">
+            <button onclick="setAllFlexPreset('open')">✋ All Open</button>
+            <button onclick="setAllFlexPreset('neutral')">🖐️ All Neutral</button>
+            <button onclick="setAllFlexPreset('closed')">✊ All Closed</button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Biometric Override -->
+      <div class="panel">
+        <div class="panel-header" onclick="togglePanel(this)">
+          <h2>❤️ Biometric Override</h2>
+          <span class="toggle">▼</span>
+        </div>
+        <div class="panel-content">
+          <div class="checkbox-row">
+            <input type="checkbox" id="bioEnabled" onchange="updateOverride()">
+            <label for="bioEnabled">Enable Biometric Override</label>
+          </div>
+          
+          <div class="control-group">
+            <label>Heart Rate Range (BPM)</label>
+            <div class="range-row">
+              <div class="range-input">
+                <small>Min</small>
+                <input type="number" id="hrMin" value="70" min="40" max="180" onchange="updateOverride()">
+              </div>
+              <div class="range-input">
+                <small>Max</small>
+                <input type="number" id="hrMax" value="80" min="40" max="180" onchange="updateOverride()">
+              </div>
+            </div>
+            <div class="value-display" id="hrValue">70 - 80 BPM</div>
+          </div>
+          
+          <div class="control-group">
+            <label>SpO2 Range (%)</label>
+            <div class="range-row">
+              <div class="range-input">
+                <small>Min</small>
+                <input type="number" id="spo2Min" value="97" min="80" max="100" onchange="updateOverride()">
+              </div>
+              <div class="range-input">
+                <small>Max</small>
+                <input type="number" id="spo2Max" value="99" min="80" max="100" onchange="updateOverride()">
+              </div>
+            </div>
+            <div class="value-display" id="spo2Value">97 - 99%</div>
+          </div>
+          
+          <div class="btn-grid">
+            <button onclick="setBioPreset('normal')">✅ Normal</button>
+            <button onclick="setBioPreset('elevated')">⚠️ Elevated</button>
+            <button onclick="setBioPreset('critical')">🚨 Critical</button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Mech Override -->
+      <div class="panel">
+        <div class="panel-header" onclick="togglePanel(this)">
+          <h2>🤖 Mech Sensor Override</h2>
+          <span class="toggle">▼</span>
+        </div>
+        <div class="panel-content">
+          <div class="checkbox-row">
+            <input type="checkbox" id="mechEnabled" onchange="updateOverride()">
+            <label for="mechEnabled">Enable Mech Override</label>
+          </div>
+          
+          <div class="control-group">
+            <label>Gas Range (%)</label>
+            <div class="range-row">
+              <div class="range-input">
+                <small>Min</small>
+                <input type="number" id="gasMin" value="3" min="0" max="100" onchange="updateOverride()">
+              </div>
+              <div class="range-input">
+                <small>Max</small>
+                <input type="number" id="gasMax" value="7" min="0" max="100" onchange="updateOverride()">
+              </div>
+            </div>
+          </div>
+          
+          <div class="control-group">
+            <label>Temperature Range (°C)</label>
+            <div class="range-row">
+              <div class="range-input">
+                <small>Min</small>
+                <input type="number" id="tempMin" value="23" min="10" max="50" step="0.5" onchange="updateOverride()">
+              </div>
+              <div class="range-input">
+                <small>Max</small>
+                <input type="number" id="tempMax" value="25" min="10" max="50" step="0.5" onchange="updateOverride()">
+              </div>
+            </div>
+          </div>
+          
+          <div class="control-group">
+            <label>Distance Range (cm)</label>
+            <div class="range-row">
+              <div class="range-input">
+                <small>Min</small>
+                <input type="number" id="distMin" value="45" min="0" max="400" onchange="updateOverride()">
+              </div>
+              <div class="range-input">
+                <small>Max</small>
+                <input type="number" id="distMax" value="55" min="0" max="400" onchange="updateOverride()">
+              </div>
+            </div>
+          </div>
+          
+          <div class="btn-grid">
+            <button onclick="setMechPreset('safe')">✅ Safe</button>
+            <button onclick="setMechPreset('warning')">⚠️ Warning</button>
+            <button onclick="setMechPreset('danger')">🚨 Danger</button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Thresholds -->
+      <div class="panel">
+        <div class="panel-header" onclick="togglePanel(this)">
+          <h2>⚠️ Alert Thresholds</h2>
+          <span class="toggle">▼</span>
+        </div>
+        <div class="panel-content">
+          <div class="info-box">
+            Configure when warnings and emergencies trigger based on sensor readings.
+          </div>
+          
+          <div class="control-group">
+            <label>Temperature (°C)</label>
+            <div class="threshold-grid">
+              <div class="range-input">
+                <small>Critical Low</small>
+                <input type="number" id="tempCritLow" value="15" onchange="updateThresholds()">
+              </div>
+              <div class="range-input">
+                <small>Min Warn</small>
+                <input type="number" id="tempWarnMin" value="20" onchange="updateThresholds()">
+              </div>
+              <div class="range-input">
+                <small>Max Warn</small>
+                <input type="number" id="tempWarnMax" value="48" onchange="updateThresholds()">
+              </div>
+              <div class="range-input">
+                <small>Critical High</small>
+                <input type="number" id="tempCritHigh" value="35" onchange="updateThresholds()">
+              </div>
+            </div>
+          </div>
+          
+          <div class="control-group">
+            <label>Gas (%)</label>
+            <div class="range-row">
+              <div class="range-input">
+                <small>Max Warning</small>
+                <input type="number" id="gasWarnMax" value="30" onchange="updateThresholds()">
+              </div>
+              <div class="range-input">
+                <small>Critical High</small>
+                <input type="number" id="gasCritHigh" value="50" onchange="updateThresholds()">
+              </div>
+            </div>
+          </div>
+          
+          <button onclick="resetThresholds()" class="warning" style="width: 100%; margin-top: 0.5rem;">Reset to Defaults</button>
+        </div>
+      </div>
+      
+      <!-- Emergency -->
+      <div class="panel">
+        <div class="panel-header" onclick="togglePanel(this)">
+          <h2>🚨 Emergency Control</h2>
+          <span class="toggle">▼</span>
+        </div>
+        <div class="panel-content">
+          <div class="danger-box">
+            ⚠️ These controls affect ALL connected devices (hand, mech, websites).
+          </div>
+          
+          <div class="checkbox-row">
+            <input type="checkbox" id="autoEmergency" checked onchange="updateOverride()">
+            <label for="autoEmergency">Enable Auto-Emergency Detection</label>
+          </div>
+          
+          <div class="btn-group" style="margin-top: 1rem;">
+            <button class="danger" onclick="triggerEmergency()">🚨 Trigger Emergency</button>
+            <button class="success" onclick="clearEmergency()">✅ Clear Emergency</button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Activity Log -->
+      <div class="panel">
+        <div class="panel-header" onclick="togglePanel(this)">
+          <h2>📋 Activity Log</h2>
+          <span class="toggle">▼</span>
+        </div>
+        <div class="panel-content">
+          <div class="log-container" id="logContainer">
+            <div class="log-entry">
+              <span class="log-time">--:--:--</span>
+              <span class="log-msg">System ready</span>
+            </div>
+          </div>
+          <button onclick="clearLog()" style="margin-top: 0.75rem; width: 100%;">Clear Log</button>
+        </div>
+      </div>
+    </div>
+    
+    <footer>
+      Admin Panel © 2025 | <a href="/">Back to Dashboard</a>
+    </footer>
+  </div>
+  
+  <script>
+    // ========================================
+    // State
+    // ========================================
+    
+    let ws = null;
+    
+    const overrideState = {
+      flex: {
+        enabled: false,
+        forwardToServos: false,
+        flex_1_2: { enabled: false, min: 45, max: 55 },
+        flex_3_4: { enabled: false, min: 45, max: 55 },
+        flex_5: { enabled: false, min: 45, max: 55 }
+      },
+      biometric: {
+        enabled: false,
+        heart_rate: { min: 70, max: 80 },
+        spo2: { min: 97, max: 99 }
+      },
+      mech: {
+        enabled: false,
+        gas: { min: 3, max: 7 },
+        temperature: { min: 23, max: 25 },
+        ultrasonic: { min: 45, max: 55 }
+      },
+      thresholds: {
+        temperature: { min: 20, max: 48, critical_low: 15, critical_high: 35 },
+        gas: { min: 0, max: 30, critical_low: 0, critical_high: 50 }
+      },
+      autoEmergency: true
+    };
+    
+    // ========================================
+    // WebSocket
+    // ========================================
+    
+    function connect() {
+      const wsUrl = `ws://${window.location.hostname}:8081`;
+      ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        document.getElementById('wsStatus').classList.add('connected');
+        document.getElementById('wsStatusText').textContent = 'Connected';
+        ws.send(JSON.stringify({ type: 'identify', client: 'admin' }));
+        log('Connected to server', 'success');
+      };
+      
+      ws.onclose = () => {
+        document.getElementById('wsStatus').classList.remove('connected');
+        document.getElementById('wsStatusText').textContent = 'Disconnected';
+        log('Disconnected', 'danger');
+        setTimeout(connect, 3000);
+      };
+      
+      ws.onerror = (err) => {
+        console.error('WS Error:', err);
+        log('Connection error', 'danger');
+      };
+      
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'admin.override_state' && msg.payload?.overrideState) {
+            loadState(msg.payload.overrideState);
+          }
+        } catch (e) {
+          console.error('Parse error:', e);
+        }
+      };
+    }
+    
+    // ========================================
+    // State Management
+    // ========================================
+    
+    function loadState(state) {
+      // Load flex
+      if (state.flex) {
+        overrideState.flex = { ...overrideState.flex, ...state.flex };
+        document.getElementById('flexEnabled').checked = state.flex.enabled;
+        document.getElementById('forwardServos').checked = state.flex.forwardToServos || false;
+        
+        if (state.flex.flex_1_2) {
+          document.getElementById('flex12Enabled').checked = state.flex.flex_1_2.enabled;
+          document.getElementById('flex12Min').value = state.flex.flex_1_2.min;
+          document.getElementById('flex12Max').value = state.flex.flex_1_2.max;
+          updateFlexDisplay('flex_1_2');
+        }
+        if (state.flex.flex_3_4) {
+          document.getElementById('flex34Enabled').checked = state.flex.flex_3_4.enabled;
+          document.getElementById('flex34Min').value = state.flex.flex_3_4.min;
+          document.getElementById('flex34Max').value = state.flex.flex_3_4.max;
+          updateFlexDisplay('flex_3_4');
+        }
+        if (state.flex.flex_5) {
+          document.getElementById('flex5Enabled').checked = state.flex.flex_5.enabled;
+          document.getElementById('flex5Min').value = state.flex.flex_5.min;
+          document.getElementById('flex5Max').value = state.flex.flex_5.max;
+          updateFlexDisplay('flex_5');
+        }
+      }
+      
+      // Load biometric
+      if (state.biometric) {
+        overrideState.biometric = state.biometric;
+        document.getElementById('bioEnabled').checked = state.biometric.enabled;
+        document.getElementById('hrMin').value = state.biometric.heart_rate.min;
+        document.getElementById('hrMax').value = state.biometric.heart_rate.max;
+        document.getElementById('spo2Min').value = state.biometric.spo2.min;
+        document.getElementById('spo2Max').value = state.biometric.spo2.max;
+        updateBioDisplay();
+      }
+      
+      // Load mech
+      if (state.mech) {
+        overrideState.mech = state.mech;
+        document.getElementById('mechEnabled').checked = state.mech.enabled;
+        document.getElementById('gasMin').value = state.mech.gas.min;
+        document.getElementById('gasMax').value = state.mech.gas.max;
+        document.getElementById('tempMin').value = state.mech.temperature.min;
+        document.getElementById('tempMax').value = state.mech.temperature.max;
+        document.getElementById('distMin').value = state.mech.ultrasonic.min;
+        document.getElementById('distMax').value = state.mech.ultrasonic.max;
+      }
+      
+      // Load thresholds
+      if (state.thresholds) {
+        if (state.thresholds.temperature) {
+          document.getElementById('tempCritLow').value = state.thresholds.temperature.critical_low;
+          document.getElementById('tempWarnMin').value = state.thresholds.temperature.min;
+          document.getElementById('tempWarnMax').value = state.thresholds.temperature.max;
+          document.getElementById('tempCritHigh').value = state.thresholds.temperature.critical_high;
+        }
+        if (state.thresholds.gas) {
+          document.getElementById('gasWarnMax').value = state.thresholds.gas.max;
+          document.getElementById('gasCritHigh').value = state.thresholds.gas.critical_high;
+        }
+      }
+      
+      // Load auto emergency
+      if (state.autoEmergency !== undefined) {
+        document.getElementById('autoEmergency').checked = state.autoEmergency;
+        overrideState.autoEmergency = state.autoEmergency;
+      }
+      
+      log('State loaded from server');
+    }
+    
+    function updateOverride() {
+      // Read flex state
+      overrideState.flex.enabled = document.getElementById('flexEnabled').checked;
+      overrideState.flex.forwardToServos = document.getElementById('forwardServos').checked;
+      overrideState.flex.flex_1_2.enabled = document.getElementById('flex12Enabled').checked;
+      overrideState.flex.flex_1_2.min = parseFloat(document.getElementById('flex12Min').value);
+      overrideState.flex.flex_1_2.max = parseFloat(document.getElementById('flex12Max').value);
+      overrideState.flex.flex_3_4.enabled = document.getElementById('flex34Enabled').checked;
+      overrideState.flex.flex_3_4.min = parseFloat(document.getElementById('flex34Min').value);
+      overrideState.flex.flex_3_4.max = parseFloat(document.getElementById('flex34Max').value);
+      overrideState.flex.flex_5.enabled = document.getElementById('flex5Enabled').checked;
+      overrideState.flex.flex_5.min = parseFloat(document.getElementById('flex5Min').value);
+      overrideState.flex.flex_5.max = parseFloat(document.getElementById('flex5Max').value);
+      
+      // Read biometric state
+      overrideState.biometric.enabled = document.getElementById('bioEnabled').checked;
+      overrideState.biometric.heart_rate.min = parseFloat(document.getElementById('hrMin').value);
+      overrideState.biometric.heart_rate.max = parseFloat(document.getElementById('hrMax').value);
+      overrideState.biometric.spo2.min = parseFloat(document.getElementById('spo2Min').value);
+      overrideState.biometric.spo2.max = parseFloat(document.getElementById('spo2Max').value);
+      
+      // Read mech state
+      overrideState.mech.enabled = document.getElementById('mechEnabled').checked;
+      overrideState.mech.gas.min = parseFloat(document.getElementById('gasMin').value);
+      overrideState.mech.gas.max = parseFloat(document.getElementById('gasMax').value);
+      overrideState.mech.temperature.min = parseFloat(document.getElementById('tempMin').value);
+      overrideState.mech.temperature.max = parseFloat(document.getElementById('tempMax').value);
+      overrideState.mech.ultrasonic.min = parseFloat(document.getElementById('distMin').value);
+      overrideState.mech.ultrasonic.max = parseFloat(document.getElementById('distMax').value);
+      
+      // Read auto emergency
+      overrideState.autoEmergency = document.getElementById('autoEmergency').checked;
+      
+      // Update displays
+      updateFlexDisplay('flex_1_2');
+      updateFlexDisplay('flex_3_4');
+      updateFlexDisplay('flex_5');
+      updateBioDisplay();
+      
+      // Send to server
+      sendOverride();
+    }
+    
+    function updateThresholds() {
+      overrideState.thresholds.temperature = {
+        critical_low: parseFloat(document.getElementById('tempCritLow').value),
+        min: parseFloat(document.getElementById('tempWarnMin').value),
+        max: parseFloat(document.getElementById('tempWarnMax').value),
+        critical_high: parseFloat(document.getElementById('tempCritHigh').value)
+      };
+      
+      overrideState.thresholds.gas = {
+        min: 0,
+        max: parseFloat(document.getElementById('gasWarnMax').value),
+        critical_low: 0,
+        critical_high: parseFloat(document.getElementById('gasCritHigh').value)
+      };
+      
+      sendOverride();
+      log('Thresholds updated');
+    }
+    
+    function sendOverride() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      
+      ws.send(JSON.stringify({
+        type: 'admin_override',
+        overrideState: overrideState
+      }));
+    }
+    
+    // ========================================
+    // Display Updates
+    // ========================================
+    
+    function updateFlexDisplay(sensor) {
+      const id = sensor.replace(/_/g, '');
+      const min = overrideState.flex[sensor].min;
+      const max = overrideState.flex[sensor].max;
+      document.getElementById(`${id}Value`).textContent = `${min} - ${max}%`;
+    }
+    
+    function updateBioDisplay() {
+      document.getElementById('hrValue').textContent = 
+        `${overrideState.biometric.heart_rate.min} - ${overrideState.biometric.heart_rate.max} BPM`;
+      document.getElementById('spo2Value').textContent = 
+        `${overrideState.biometric.spo2.min} - ${overrideState.biometric.spo2.max}%`;
+    }
+    
+    // ========================================
+    // Presets
+    // ========================================
+    
+    function setFlexPreset(sensor, min, max) {
+      const id = sensor.replace(/_/g, '');
+      document.getElementById(`${id}Min`).value = min;
+      document.getElementById(`${id}Max`).value = max;
+      updateOverride();
+      log(`Flex ${sensor} set to ${min}-${max}%`);
+    }
+    
+    function setAllFlexPreset(preset) {
+      let min, max;
+      switch (preset) {
+        case 'open': min = 0; max = 5; break;
+        case 'neutral': min = 45; max = 55; break;
+        case 'closed': min = 95; max = 100; break;
+      }
+      setFlexPreset('flex_1_2', min, max);
+      setFlexPreset('flex_3_4', min, max);
+      setFlexPreset('flex_5', min, max);
+    }
+    
+    function setBioPreset(preset) {
+      switch (preset) {
+        case 'normal':
+          document.getElementById('hrMin').value = 70;
+          document.getElementById('hrMax').value = 80;
+          document.getElementById('spo2Min').value = 97;
+          document.getElementById('spo2Max').value = 99;
+          break;
+        case 'elevated':
+          document.getElementById('hrMin').value = 105;
+          document.getElementById('hrMax').value = 115;
+          document.getElementById('spo2Min').value = 93;
+          document.getElementById('spo2Max').value = 95;
+          break;
+        case 'critical':
+          document.getElementById('hrMin').value = 155;
+          document.getElementById('hrMax').value = 165;
+          document.getElementById('spo2Min').value = 80;
+          document.getElementById('spo2Max').value = 84;
+          break;
+      }
+      updateOverride();
+      log(`Biometric preset: ${preset}`);
+    }
+    
+    function setMechPreset(preset) {
+      switch (preset) {
+        case 'safe':
+          document.getElementById('gasMin').value = 3;
+          document.getElementById('gasMax').value = 7;
+          document.getElementById('tempMin').value = 23;
+          document.getElementById('tempMax').value = 25;
+          document.getElementById('distMin').value = 95;
+          document.getElementById('distMax').value = 105;
+          break;
+        case 'warning':
+          document.getElementById('gasMin').value = 32;
+          document.getElementById('gasMax').value = 38;
+          document.getElementById('tempMin').value = 47;
+          document.getElementById('tempMax').value = 49;
+          document.getElementById('distMin').value = 8;
+          document.getElementById('distMax').value = 12;
+          break;
+        case 'danger':
+          document.getElementById('gasMin').value = 58;
+          document.getElementById('gasMax').value = 65;
+          document.getElementById('tempMin').value = 37;
+          document.getElementById('tempMax').value = 39;
+          document.getElementById('distMin').value = 1;
+          document.getElementById('distMax').value = 3;
+          break;
+      }
+      updateOverride();
+      log(`Mech preset: ${preset}`);
+    }
+    
+    function resetThresholds() {
+      document.getElementById('tempCritLow').value = 15;
+      document.getElementById('tempWarnMin').value = 20;
+      document.getElementById('tempWarnMax').value = 48;
+      document.getElementById('tempCritHigh').value = 35;
+      document.getElementById('gasWarnMax').value = 30;
+      document.getElementById('gasCritHigh').value = 50;
+      updateThresholds();
+      log('Thresholds reset to defaults', 'warning');
+    }
+    
+    // ========================================
+    // Emergency
+    // ========================================
+    
+    function triggerEmergency() {
+      if (!confirm('Trigger emergency on ALL devices?')) return;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        alert('Not connected');
+        return;
+      }
+      ws.send(JSON.stringify({
+        type: 'emergency_alert',
+        active: true,
+        timestamp: Date.now()
+      }));
+      log('Emergency TRIGGERED', 'danger');
+    }
+    
+    function clearEmergency() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({
+        type: 'emergency_ack',
+        timestamp: Date.now()
+      }));
+      log('Emergency cleared', 'success');
+    }
+    
+    // ========================================
+    // Reset & UI
+    // ========================================
+    
+    function resetAll() {
+      if (!confirm('Reset all overrides to defaults?')) return;
+      
+      // Reset checkboxes
+      document.getElementById('flexEnabled').checked = false;
+      document.getElementById('forwardServos').checked = false;
+      document.getElementById('flex12Enabled').checked = false;
+      document.getElementById('flex34Enabled').checked = false;
+      document.getElementById('flex5Enabled').checked = false;
+      document.getElementById('bioEnabled').checked = false;
+      document.getElementById('mechEnabled').checked = false;
+      document.getElementById('autoEmergency').checked = true;
+      
+      // Reset values
+      setFlexPreset('flex_1_2', 45, 55);
+      setFlexPreset('flex_3_4', 45, 55);
+      setFlexPreset('flex_5', 45, 55);
+      setBioPreset('normal');
+      setMechPreset('safe');
+      resetThresholds();
+      
+      updateOverride();
+      log('All overrides reset', 'warning');
+    }
+    
+    function togglePanel(header) {
+      header.classList.toggle('collapsed');
+      const content = header.nextElementSibling;
+      
+      if (header.classList.contains('collapsed')) {
+        content.classList.add('collapsed');
+      } else {
+        content.classList.remove('collapsed');
+        content.style.maxHeight = content.scrollHeight + 'px';
+      }
+    }
+    
+    function log(message, type = 'info') {
+      const container = document.getElementById('logContainer');
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      
+      const time = new Date().toLocaleTimeString();
+      entry.innerHTML = `
+        <span class="log-time">${time}</span>
+        <span class="log-msg ${type}">${message}</span>
+      `;
+      
+      container.insertBefore(entry, container.firstChild);
+      
+      // Keep only 50 entries
+      while (container.children.length > 50) {
+        container.removeChild(container.lastChild);
+      }
+    }
+    
+    function clearLog() {
+      const container = document.getElementById('logContainer');
+      container.innerHTML = `
+        <div class="log-entry">
+          <span class="log-time">--:--:--</span>
+          <span class="log-msg">Log cleared</span>
+        </div>
+      `;
+    }
+    
+    // ========================================
+    // Initialize
+    // ========================================
+    
+    document.addEventListener('DOMContentLoaded', () => {
+      // Set initial panel heights
+      document.querySelectorAll('.panel-content').forEach(content => {
+        content.style.maxHeight = content.scrollHeight + 'px';
+      });
+      
+      connect();
+    });
+  </script>
+</body>
+</html>

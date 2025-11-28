@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Robot Control Dashboard</title>
+  <style>
+    :root {
+      --primary: #6366f1;
+      --primary-dark: #4f46e5;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --bg: #0f172a;
+      --card: #1e293b;
+      --text: #e2e8f0;
+      --text-muted: #94a3b8;
+      --border: #334155;
+    }
+    
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 1rem;
+    }
+    
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    
+    /* Header */
+    header {
+      background: var(--card);
+      padding: 1rem 1.5rem;
+      border-radius: 0.75rem;
+      margin-bottom: 1.5rem;
+      border: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+    
+    header h1 {
+      font-size: 1.5rem;
+      color: var(--primary);
+    }
+    
+    .status-bar {
+      display: flex;
+      gap: 1.5rem;
+      align-items: center;
+    }
+    
+    .status-item {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #475569;
+    }
+    
+    .status-dot.connected {
+      background: var(--success);
+      box-shadow: 0 0 8px var(--success);
+    }
+    
+    .last-update {
+      color: var(--text-muted);
+      font-size: 0.875rem;
+    }
+    
+    /* Grid */
+    .dashboard {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 1.5rem;
+    }
+    
+    /* Cards */
+    .card {
+      background: var(--card);
+      border-radius: 0.75rem;
+      padding: 1.25rem;
+      border: 1px solid var(--border);
+    }
+    
+    .card h2 {
+      font-size: 1.125rem;
+      margin-bottom: 1rem;
+      color: var(--primary);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    
+    /* Data rows */
+    .data-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.75rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+    
+    .data-row:last-child { border-bottom: none; }
+    
+    .data-label {
+      color: var(--text-muted);
+    }
+    
+    .data-value {
+      font-weight: 600;
+      color: var(--text);
+    }
+    
+    /* Progress bars */
+    .progress-bar {
+      height: 8px;
+      background: var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-top: 0.5rem;
+    }
+    
+    .progress-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.3s ease;
+    }
+    
+    .progress-fill.flex12 { background: #3b82f6; }
+    .progress-fill.flex34 { background: #8b5cf6; }
+    .progress-fill.flex5 { background: #ec4899; }
+    .progress-fill.gas { background: linear-gradient(90deg, var(--success), var(--warning)); }
+    .progress-fill.dist { background: linear-gradient(90deg, var(--primary), var(--success)); }
+    
+    /* Servo grid */
+    .servo-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.5rem;
+    }
+    
+    .servo-item {
+      background: rgba(99, 102, 241, 0.1);
+      padding: 0.75rem;
+      border-radius: 0.5rem;
+      text-align: center;
+      border: 1px solid rgba(99, 102, 241, 0.2);
+    }
+    
+    .servo-item .name {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+    
+    .servo-item .angle {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--primary);
+    }
+    
+    /* Controls */
+    .control-section {
+      margin-top: 1.25rem;
+      padding-top: 1.25rem;
+      border-top: 1px solid var(--border);
+    }
+    
+    .control-section h3 {
+      font-size: 0.875rem;
+      color: var(--text-muted);
+      margin-bottom: 0.75rem;
+    }
+    
+    select, input[type="range"] {
+      width: 100%;
+      padding: 0.5rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 0.375rem;
+      color: var(--text);
+      margin-bottom: 0.75rem;
+    }
+    
+    .range-labels {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+    
+    .range-labels .current {
+      color: var(--primary);
+      font-weight: 600;
+    }
+    
+    .btn-group {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.5rem;
+    }
+    
+    button {
+      padding: 0.625rem 1rem;
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 0.375rem;
+      cursor: pointer;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+    
+    button:hover {
+      background: var(--primary-dark);
+      transform: translateY(-1px);
+    }
+    
+    button.secondary {
+      background: var(--border);
+    }
+    
+    button.secondary:hover {
+      background: #475569;
+    }
+    
+    button.danger {
+      background: var(--danger);
+    }
+    
+    button.danger:hover {
+      background: #dc2626;
+    }
+    
+    button.success {
+      background: var(--success);
+    }
+    
+    button.success:hover {
+      background: #059669;
+    }
+    
+    /* Checkbox */
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem;
+      background: rgba(245, 158, 11, 0.1);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      border-radius: 0.375rem;
+      margin-bottom: 0.75rem;
+      font-size: 0.875rem;
+    }
+    
+    .checkbox-row input {
+      width: 16px;
+      height: 16px;
+    }
+    
+    /* Emergency alert */
+    .emergency-banner {
+      display: none;
+      background: var(--danger);
+      padding: 1.5rem;
+      border-radius: 0.75rem;
+      text-align: center;
+      margin-bottom: 1.5rem;
+      animation: pulse-emergency 1s infinite;
+    }
+    
+    .emergency-banner.active {
+      display: block;
+    }
+    
+    @keyframes pulse-emergency {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+    
+    .emergency-banner h2 {
+      font-size: 1.5rem;
+      margin-bottom: 0.5rem;
+      color: white;
+    }
+    
+    .emergency-banner p {
+      margin-bottom: 1rem;
+      color: rgba(255,255,255,0.9);
+    }
+    
+    .emergency-banner button {
+      background: white;
+      color: var(--danger);
+      font-weight: 700;
+    }
+    
+    /* Vital alert */
+    .vital-alert {
+      display: none;
+      padding: 1rem;
+      border-radius: 0.5rem;
+      margin-bottom: 1rem;
+    }
+    
+    .vital-alert.warning {
+      display: block;
+      background: rgba(245, 158, 11, 0.15);
+      border: 1px solid var(--warning);
+      color: var(--warning);
+    }
+    
+    .vital-alert.critical {
+      display: block;
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid var(--danger);
+      color: var(--danger);
+      animation: pulse-warning 2s infinite;
+    }
+    
+    @keyframes pulse-warning {
+      0%, 100% { border-color: var(--danger); }
+      50% { border-color: rgba(239, 68, 68, 0.5); }
+    }
+    
+    /* Footer */
+    footer {
+      text-align: center;
+      color: var(--text-muted);
+      padding: 2rem 0 1rem;
+      font-size: 0.875rem;
+    }
+    
+    /* No data state */
+    .no-data {
+      color: var(--text-muted);
+      font-style: italic;
+      text-align: center;
+      padding: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <!-- Audio -->
+  <audio id="alarmSound" preload="auto" loop>
+    <source src="alarm.mp3" type="audio/mpeg">
+  </audio>
+  
+  <div class="container">
+    <header>
+      <h1>🤖 Robot Control Dashboard</h1>
+      <div class="status-bar">
+        <div class="status-item">
+          <div class="status-dot" id="wsStatus"></div>
+          <span id="wsStatusText">Connecting...</span>
+        </div>
+        <div class="status-item">
+          <div class="status-dot" id="handStatus"></div>
+          <span>Hand</span>
+        </div>
+        <div class="status-item">
+          <div class="status-dot" id="mechStatus"></div>
+          <span>Mech</span>
+        </div>
+        <span class="last-update" id="lastUpdate">--</span>
+      </div>
+    </header>
+    
+    <!-- Emergency Banner -->
+    <div class="emergency-banner" id="emergencyBanner">
+      <h2>🚨 EMERGENCY ACTIVE 🚨</h2>
+      <p id="emergencyReason">Emergency triggered</p>
+      <button onclick="acknowledgeEmergency()">ACKNOWLEDGE</button>
+    </div>
+    
+    <!-- Vital Alert -->
+    <div class="vital-alert" id="vitalAlert">
+      <strong>⚠️ Warning:</strong> <span id="vitalAlertText"></span>
+    </div>
+    
+    <div class="dashboard">
+      <!-- Flex Sensors -->
+      <div class="card">
+        <h2>✋ Flex Sensors</h2>
+        <div class="data-row">
+          <span class="data-label">Servos 1-2</span>
+          <span class="data-value" id="flex12">--%</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill flex12" id="flex12Progress" style="width: 0%"></div>
+        </div>
+        
+        <div class="data-row">
+          <span class="data-label">Servos 3-4</span>
+          <span class="data-value" id="flex34">--%</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill flex34" id="flex34Progress" style="width: 0%"></div>
+        </div>
+        
+        <div class="data-row">
+          <span class="data-label">Servo 5</span>
+          <span class="data-value" id="flex5">--%</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill flex5" id="flex5Progress" style="width: 0%"></div>
+        </div>
+      </div>
+      
+      <!-- Biometrics -->
+      <div class="card">
+        <h2>❤️ Biometrics</h2>
+        <div class="data-row">
+          <span class="data-label">Heart Rate</span>
+          <span class="data-value" id="heartRate">-- BPM</span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">SpO2</span>
+          <span class="data-value" id="spo2">--%</span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">Status</span>
+          <span class="data-value" id="bioStatus">--</span>
+        </div>
+      </div>
+      
+      <!-- Servo Control -->
+      <div class="card">
+        <h2>🦾 Servo Control</h2>
+        <div class="servo-grid" id="servoGrid">
+          <div class="no-data">No servo data</div>
+        </div>
+        
+        <div class="control-section">
+          <h3>Manual Control</h3>
+          <select id="servoSelect">
+            <option value="all">All Servos</option>
+            <option value="servo_1">Servo 1</option>
+            <option value="servo_2">Servo 2</option>
+            <option value="servo_3">Servo 3</option>
+            <option value="servo_4">Servo 4</option>
+            <option value="servo_5">Servo 5</option>
+          </select>
+          
+          <div class="checkbox-row">
+            <input type="checkbox" id="emergencyOverride">
+            <label for="emergencyOverride">⚠️ Override Emergency Lock</label>
+          </div>
+          
+          <input type="range" id="servoSlider" min="0" max="180" value="90">
+          <div class="range-labels">
+            <span>0°</span>
+            <span class="current" id="servoAngle">90°</span>
+            <span>180°</span>
+          </div>
+          
+          <div class="btn-group">
+            <button class="secondary" onclick="setServo(0)">0°</button>
+            <button class="secondary" onclick="setServo(90)">90°</button>
+            <button class="secondary" onclick="setServo(180)">180°</button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Gas Sensor -->
+      <div class="card">
+        <h2>💨 Gas Sensor</h2>
+        <div class="data-row">
+          <span class="data-label">Level</span>
+          <span class="data-value" id="gasLevel">--%</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill gas" id="gasProgress" style="width: 0%"></div>
+        </div>
+        <div class="data-row">
+          <span class="data-label">Alert</span>
+          <span class="data-value" id="gasAlert">--</span>
+        </div>
+      </div>
+      
+      <!-- Temperature -->
+      <div class="card">
+        <h2>🌡️ Temperature</h2>
+        <div class="data-row">
+          <span class="data-label">Celsius</span>
+          <span class="data-value" id="tempC">--°C</span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">Fahrenheit</span>
+          <span class="data-value" id="tempF">--°F</span>
+        </div>
+      </div>
+      
+      <!-- Ultrasonic -->
+      <div class="card">
+        <h2>📏 Distance</h2>
+        <div class="data-row">
+          <span class="data-label">Centimeters</span>
+          <span class="data-value" id="distCm">-- cm</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill dist" id="distProgress" style="width: 0%"></div>
+        </div>
+        <div class="data-row">
+          <span class="data-label">Inches</span>
+          <span class="data-value" id="distIn">-- in</span>
+        </div>
+      </div>
+      
+      <!-- Emergency Control -->
+      <div class="card">
+        <h2>🚨 Emergency</h2>
+        <div class="data-row">
+          <span class="data-label">Status</span>
+          <span class="data-value" id="emergencyStatus">Normal</span>
+        </div>
+        <div class="data-row">
+          <span class="data-label">Level</span>
+          <span class="data-value" id="emergencyLevel">Normal</span>
+        </div>
+        <div class="control-section">
+          <div class="btn-group" style="grid-template-columns: 1fr 1fr;">
+            <button class="danger" onclick="triggerEmergency()">Trigger</button>
+            <button class="success" onclick="acknowledgeEmergency()">Clear</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <footer>
+      Robot Control Dashboard © 2025 | <a href="admin.html" style="color: var(--primary);">Admin Panel</a>
+    </footer>
+  </div>
+  
+  <script>
+    // ========================================
+    // WebSocket Connection
+    // ========================================
+    
+    let ws = null;
+    const WS_URL = `ws://${window.location.hostname}:8081`;
+    
+    function connect() {
+      ws = new WebSocket(WS_URL);
+      
+      ws.onopen = () => {
+        document.getElementById('wsStatus').classList.add('connected');
+        document.getElementById('wsStatusText').textContent = 'Connected';
+        ws.send(JSON.stringify({ type: 'identify', client: 'site' }));
+      };
+      
+      ws.onclose = () => {
+        document.getElementById('wsStatus').classList.remove('connected');
+        document.getElementById('wsStatusText').textContent = 'Disconnected';
+        setTimeout(connect, 3000);
+      };
+      
+      ws.onerror = (err) => console.error('WS Error:', err);
+      
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          handleMessage(msg);
+        } catch (e) {
+          console.error('Parse error:', e);
+        }
+      };
+    }
+    
+    // ========================================
+    // Message Handlers
+    // ========================================
+    
+    function handleMessage(msg) {
+      const type = msg.type;
+      const payload = msg.payload || msg;
+      
+      switch (type) {
+        case 'server.initial_data':
+        case 'server.periodic_update':
+        case 'periodic_update':
+        case 'initial_data':
+          updateDashboard(payload.hand, payload.mech, payload.emergencyState);
+          break;
+          
+        case 'hand.flex_data':
+        case 'flex_data':
+          updateFlex(payload);
+          break;
+          
+        case 'hand.biometric_data':
+        case 'max30102_data':
+          updateBiometric(payload);
+          break;
+          
+        case 'emergency.status':
+        case 'emergency_status':
+          updateEmergency(payload);
+          break;
+          
+        case 'server.vital_alert':
+        case 'vital_alert':
+          showVitalAlert(payload);
+          break;
+      }
+    }
+    
+    // ========================================
+    // UI Update Functions
+    // ========================================
+    
+    function updateDashboard(hand, mech, emergency) {
+      document.getElementById('lastUpdate').textContent = 
+        `Updated: ${new Date().toLocaleTimeString()}`;
+      
+      // Connection status
+      const now = Date.now();
+      const handOk = hand?.timestamp && (now - hand.timestamp < 10000);
+      const mechOk = mech?.timestamp && (now - mech.timestamp < 10000);
+      
+      document.getElementById('handStatus').classList.toggle('connected', handOk);
+      document.getElementById('mechStatus').classList.toggle('connected', mechOk);
+      
+      // Hand data
+      if (hand?.flex) updateFlex(hand.flex);
+      if (hand?.biometric) updateBiometric(hand.biometric);
+      
+      // Mech data
+      if (mech) {
+        if (mech.servos) updateServos(mech.servos);
+        if (mech.gas) updateGas(mech.gas);
+        if (mech.temperature !== undefined) updateTemp(mech.temperature);
+        if (mech.ultrasonic !== undefined) updateDist(mech.ultrasonic);
+      }
+      
+      // Emergency
+      if (emergency) updateEmergency(emergency);
+    }
+    
+    function updateFlex(flex) {
+      if (flex.flex_1_2 !== undefined) {
+        document.getElementById('flex12').textContent = `${flex.flex_1_2.toFixed(1)}%`;
+        document.getElementById('flex12Progress').style.width = `${flex.flex_1_2}%`;
+      }
+      if (flex.flex_3_4 !== undefined) {
+        document.getElementById('flex34').textContent = `${flex.flex_3_4.toFixed(1)}%`;
+        document.getElementById('flex34Progress').style.width = `${flex.flex_3_4}%`;
+      }
+      if (flex.flex_5 !== undefined) {
+        document.getElementById('flex5').textContent = `${flex.flex_5.toFixed(1)}%`;
+        document.getElementById('flex5Progress').style.width = `${flex.flex_5}%`;
+      }
+    }
+    
+    function updateBiometric(bio) {
+      document.getElementById('heartRate').textContent = 
+        bio.heart_rate ? `${bio.heart_rate} BPM` : '-- BPM';
+      document.getElementById('spo2').textContent = 
+        bio.spo2 ? `${bio.spo2}%` : '--%';
+      document.getElementById('bioStatus').textContent = bio.status || '--';
+    }
+    
+    function updateServos(servos) {
+      const grid = document.getElementById('servoGrid');
+      grid.innerHTML = '';
+      
+      Object.entries(servos).forEach(([name, angle]) => {
+        const item = document.createElement('div');
+        item.className = 'servo-item';
+        item.innerHTML = `
+          <div class="name">${name.replace('_', ' ')}</div>
+          <div class="angle">${angle}°</div>
+        `;
+        grid.appendChild(item);
+      });
+    }
+    
+    function updateGas(gas) {
+      const level = gas.percent !== undefined ? gas.percent : gas;
+      document.getElementById('gasLevel').textContent = `${(level / 100).toFixed(2)}%`;
+      document.getElementById('gasProgress').style.width = `${Math.min(level, 100)}%`;
+      document.getElementById('gasAlert').textContent = gas.alert ? '⚠️ ALERT' : 'Normal';
+    }
+    
+    function updateTemp(temp) {
+      document.getElementById('tempC').textContent = `${temp.toFixed(1)}°C`;
+      document.getElementById('tempF').textContent = `${(temp * 9/5 + 32).toFixed(1)}°F`;
+    }
+    
+    function updateDist(dist) {
+      document.getElementById('distCm').textContent = `${dist.toFixed(1)} cm`;
+      document.getElementById('distIn').textContent = `${(dist / 2.54).toFixed(1)} in`;
+      document.getElementById('distProgress').style.width = `${Math.min(dist / 2, 100)}%`;
+    }
+    
+    function updateEmergency(state) {
+      const active = state.active;
+      const level = state.level || 'normal';
+      
+      document.getElementById('emergencyStatus').textContent = active ? 'ACTIVE' : 'Normal';
+      document.getElementById('emergencyLevel').textContent = level.charAt(0).toUpperCase() + level.slice(1);
+      
+      const banner = document.getElementById('emergencyBanner');
+      const alarm = document.getElementById('alarmSound');
+      
+      if (active) {
+        banner.classList.add('active');
+        if (state.manualTriggered) {
+          document.getElementById('emergencyReason').textContent = 'Manual emergency triggered';
+        } else if (state.autoTriggered) {
+          document.getElementById('emergencyReason').textContent = 'Auto-triggered by critical readings';
+        }
+        alarm.play().catch(() => {});
+      } else {
+        banner.classList.remove('active');
+        alarm.pause();
+        alarm.currentTime = 0;
+      }
+    }
+    
+    function showVitalAlert(data) {
+      const alert = document.getElementById('vitalAlert');
+      const text = document.getElementById('vitalAlertText');
+      
+      if (data.level === 'normal') {
+        alert.className = 'vital-alert';
+        return;
+      }
+      
+      const sensors = data.abnormal?.map(a => `${a.sensor}: ${a.value}`).join(', ') || '';
+      text.textContent = sensors;
+      
+      alert.className = `vital-alert ${data.level}`;
+    }
+    
+    // ========================================
+    // Controls
+    // ========================================
+    
+    const slider = document.getElementById('servoSlider');
+    const angleDisplay = document.getElementById('servoAngle');
+    
+    slider.addEventListener('input', () => {
+      angleDisplay.textContent = `${slider.value}°`;
+    });
+    
+    slider.addEventListener('change', () => {
+      setServo(parseInt(slider.value));
+    });
+    
+    function setServo(angle) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        alert('Not connected');
+        return;
+      }
+      
+      slider.value = angle;
+      angleDisplay.textContent = `${angle}°`;
+      
+      const servo = document.getElementById('servoSelect').value;
+      const override = document.getElementById('emergencyOverride').checked;
+      
+      if (servo === 'all') {
+        ws.send(JSON.stringify({
+          type: 'control_servos',
+          servos: {
+            servo_1: angle,
+            servo_2: angle,
+            servo_3: angle,
+            servo_4: angle,
+            servo_5: angle
+          },
+          emergencyOverride: override
+        }));
+      } else {
+        ws.send(JSON.stringify({
+          type: 'control_servo',
+          servo: servo,
+          angle: angle,
+          emergencyOverride: override
+        }));
+      }
+    }
+    
+    function triggerEmergency() {
+      if (!confirm('Trigger emergency? This will lock all servos.')) return;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      
+      ws.send(JSON.stringify({
+        type: 'emergency_alert',
+        active: true,
+        timestamp: Date.now()
+      }));
+    }
+    
+    function acknowledgeEmergency() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      
+      ws.send(JSON.stringify({
+        type: 'emergency_ack',
+        timestamp: Date.now()
+      }));
+    }
+    
+    // ========================================
+    // Initialize
+    // ========================================
+    
+    connect();
+  </script>
+</body>
+</html>
