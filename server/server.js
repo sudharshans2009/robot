@@ -275,6 +275,9 @@ const emergencyState = {
   cooldownPeriod: 30000, // 30 seconds
 };
 
+// Track vital level separately from emergency state
+let previousVitalLevel = "normal";
+
 const previousValues = {
   heart_rate: { value: null, timestamp: null },
   spo2: { value: null, timestamp: null },
@@ -513,8 +516,9 @@ function checkAllSensors() {
     }
   }
 
-  // Broadcast vital status to website
-  if (clients.site.length > 0 && emergencyState.level !== "normal") {
+  // Broadcast vital status to website (including when it returns to normal)
+  if (clients.site.length > 0 && emergencyState.level !== previousVitalLevel) {
+    previousVitalLevel = emergencyState.level;
     clients.site.forEach((client) => {
       if (client.readyState === WebSocket.OPEN) {
         client.send(

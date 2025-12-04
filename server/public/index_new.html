@@ -357,6 +357,9 @@
   <audio id="alarmSound" preload="auto" loop>
     <source src="alarm.mp3" type="audio/mpeg">
   </audio>
+  <audio id="warningSound" preload="auto">
+    <source src="warning.mp3" type="audio/mpeg">
+  </audio>
   
   <div class="container">
     <header>
@@ -733,9 +736,12 @@
     function showVitalAlert(data) {
       const alert = document.getElementById('vitalAlert');
       const text = document.getElementById('vitalAlertText');
+      const warningSound = document.getElementById('warningSound');
       
       if (data.level === 'normal') {
         alert.className = 'vital-alert';
+        warningSound.pause();
+        warningSound.currentTime = 0;
         return;
       }
       
@@ -743,6 +749,20 @@
       text.textContent = sensors;
       
       alert.className = `vital-alert ${data.level}`;
+      
+      // Play warning sound for warning or critical alerts
+      if (data.level === 'warning' || data.level === 'critical') {
+        try {
+          warningSound.currentTime = 0;
+          warningSound.loop = true;
+          const playPromise = warningSound.play();
+          if (playPromise !== undefined) {
+            playPromise.catch(err => console.log('Warning sound play failed:', err));
+          }
+        } catch (err) {
+          console.log('Warning sound error:', err);
+        }
+      }
     }
     
     // ========================================

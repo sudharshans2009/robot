@@ -42,11 +42,12 @@ import ds18x20
 # ============================================================================
 
 # WiFi
-WIFI_SSID = "Karthikeyan G"
-WIFI_PASSWORD = "9842969931"
+# WiFi
+WIFI_SSID = "Galaxy M12 7715"
+WIFI_PASSWORD = "mikk5685"
 
 # Server
-SERVER_IP = "10.204.39.143"
+SERVER_IP = "sudharshans2009-macbook.local"
 SERVER_PORT = 8081
 
 # Pin Assignments
@@ -587,16 +588,47 @@ class MechController:
             # Handle servo control (single)
             if msg_type in ('server.control_servo', 'control_servo', 'servo_control'):
                 if not self.emergency_active:
-                    servo_id = payload.get('servo_id', payload.get('id', 0))
+                    # Get servo identifier (handle both 'servo_id', 'id', and 'servo')
+                    servo_id = payload.get('servo_id', payload.get('id'))
+                    if servo_id is None:
+                        servo = payload.get('servo')
+                        if servo:
+                            # Handle string format like 'servo_1' -> 1
+                            if isinstance(servo, str) and servo.startswith('servo_'):
+                                try:
+                                    servo_id = int(servo.split('_')[1])
+                                except:
+                                    servo_id = 0
+                            else:
+                                servo_id = 0
+                        else:
+                            servo_id = 0
+                    
                     angle = payload.get('angle', 90)
                     
                     if self.servo_ctrl.set_angle(servo_id, angle):
                         print(f"  Servo {servo_id} → {angle}°")
+                    else:
+                        print(f"  Failed: Servo {servo_id} → {angle}°")
             
             # Handle servos control (bulk)
             elif msg_type in ('server.control_servos', 'control_servos', 'flex_data', 'hand.flex_data'):
                 if not self.emergency_active:
                     angles = payload.get('angles', [])
+                    
+                    # Handle servos object format: {servo_1: 90, servo_2: 90, ...}
+                    if not angles:
+                        servos_dict = payload.get('servos', {})
+                        if servos_dict and isinstance(servos_dict, dict):
+                            # Convert dict to list of angles
+                            angles = []
+                            for i in range(1, 6):  # servo_1 to servo_5
+                                servo_key = f'servo_{i}'
+                                if servo_key in servos_dict:
+                                    angles.append(servos_dict[servo_key])
+                                else:
+                                    # Keep current angle if not specified
+                                    angles.append(self.servo_ctrl.servos[i-1].get_angle() if i <= len(self.servo_ctrl.servos) else 90)
                     
                     # Handle flex_data conversion (legacy support)
                     if not angles and ('flex_1_2' in payload or 'flex1_2' in payload):
@@ -642,13 +674,21 @@ class MechController:
         }
         
         if self.gas:
-            payload['gas'] = self.gas.read()
+            gas_data = self.gas.read()
+            # Convert PPM to percentage (0-100 scale, max PPM ~500)
+            percent = min(100, (gas_data['ppm'] / 500.0) * 100)
+            payload['gas'] = {
+                'percent': percent,
+                'ppm': gas_data['ppm'],
+                'raw': gas_data['raw'],
+                'alert': gas_data['isHigh']
+            }
         
         if self.temp:
-            payload['temperature'] = self.temp.read()
+            payload['temperature_c'] = self.temp.read()
         
         if self.ultrasonic:
-            payload['distance'] = self.ultrasonic.read()
+            payload['distance_cm'] = self.ultrasonic.read()
         
         # Send
         msg = create_message('mech.sensor_data', payload)

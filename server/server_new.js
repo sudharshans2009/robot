@@ -95,6 +95,9 @@ const emergencyState = {
   cooldownUntil: 0
 };
 
+// Track vital level separately from emergency state
+let previousVitalLevel = "normal";
+
 const adminOverride = {
   flex: {
     enabled: false,
@@ -835,8 +838,7 @@ setInterval(() => {
   
   const vitalCheck = checkVitals();
   
-  // Update level
-  const prevLevel = emergencyState.level;
+  // Update emergency level only if not in active emergency
   if (!emergencyState.active) {
     emergencyState.level = vitalCheck.level;
   }
@@ -846,8 +848,9 @@ setInterval(() => {
     triggerAutoEmergency("Critical sensor readings detected", vitalCheck.abnormal);
   }
   
-  // Broadcast vital alert if level changed
-  if (vitalCheck.level !== "normal" && vitalCheck.level !== prevLevel) {
+  // Broadcast vital alert if vital level changed (independent of emergency state)
+  if (vitalCheck.level !== previousVitalLevel) {
+    previousVitalLevel = vitalCheck.level;
     const alertMsg = createMessage(
       "server.vital_alert",
       "server",
