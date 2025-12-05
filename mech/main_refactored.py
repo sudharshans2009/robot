@@ -33,7 +33,8 @@ import ubinascii
 import urandom
 import ustruct
 import time
-from utime import ticks_ms, ticks_diff, sleep_ms
+from utime import ticks_ms, ticks_diff, sleep_ms, ticks_us, sleep_us
+import time
 import onewire
 import ds18x20
 
@@ -43,11 +44,11 @@ import ds18x20
 
 # WiFi
 # WiFi
-WIFI_SSID = "Galaxy M12 7715"
-WIFI_PASSWORD = "mikk5685"
+WIFI_SSID = "Karthikeyan G"
+WIFI_PASSWORD = "9842969931"
 
 # Server
-SERVER_IP = "sudharshans2009-macbook.local"
+SERVER_IP = "10.40.94.143"
 SERVER_PORT = 8081
 
 # Pin Assignments
@@ -84,15 +85,15 @@ class GasSensor:
     def read_ppm(self):
         """Read as approximated PPM"""
         raw = self.read_raw()
-        voltage = (raw / 65535.0) * 3.3
+        # Convert to percentage (0-100) based on raw value
+        # MQ sensors output higher voltage with more gas
+        # Raw value 0-65535 maps to sensor range
+        percentage = (raw / 65535.0) * 100
         
-        # RS/R0 approximation
-        if voltage > 0:
-            rs = ((5.0 - voltage) / voltage) * 10.0
-            ratio = rs / 10.0
-            ppm = 100 * (10 ** ((1.35 - ratio) / 0.4))
-            return int(max(0, min(10000, ppm)))
-        return 0
+        # Simple linear approximation for PPM
+        # Assuming max detectable ~10000 PPM at full scale
+        ppm = int((raw / 65535.0) * 10000)
+        return max(0, min(10000, ppm))
     
     def read(self):
         """Read comprehensive gas data"""
@@ -165,29 +166,33 @@ class UltrasonicSensor:
     def read(self):
         """Read distance in centimeters"""
         try:
+            # Ensure trigger is low
             self.trigger.off()
-            sleep_ms(2)
+            sleep_us(2)
             
+            # Send 10us pulse
             self.trigger.on()
-            sleep_ms(0.01)
+            sleep_us(10)
             self.trigger.off()
             
-            # Wait for echo start
-            timeout = ticks_ms()
+            # Wait for echo to go high (timeout 30ms = 30000us)
+            timeout_start = ticks_us()
             while self.echo.value() == 0:
-                if ticks_diff(ticks_ms(), timeout) > 30:
+                if ticks_diff(ticks_us(), timeout_start) > 30000:
                     return self.last_reading
-            start = ticks_ms()
+            pulse_start = ticks_us()
             
-            # Wait for echo end
+            # Wait for echo to go low
             while self.echo.value() == 1:
-                if ticks_diff(ticks_ms(), start) > 30:
+                if ticks_diff(ticks_us(), pulse_start) > 30000:
                     return self.last_reading
-            end = ticks_ms()
+            pulse_end = ticks_us()
             
             # Calculate distance
-            duration = ticks_diff(end, start)
-            distance = (duration * 0.0343) / 2 * 1000
+            # Speed of sound = 343 m/s = 0.0343 cm/us
+            # Distance = (time * speed) / 2 (round trip)
+            duration = ticks_diff(pulse_end, pulse_start)
+            distance = (duration * 0.0343) / 2
             
             if 2 <= distance <= 400:
                 self.last_reading = round(distance, 1)

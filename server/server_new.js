@@ -613,12 +613,28 @@ function handleAdminMessage(ws, data) {
       if (newState.biometric) adminOverride.biometric = newState.biometric;
       if (newState.mech) adminOverride.mech = newState.mech;
       if (newState.thresholds) {
-        // Enforce temperature max
+        // Deep merge thresholds to preserve all fields
         adminOverride.thresholds = {
-          ...newState.thresholds,
+          heart_rate: {
+            ...adminOverride.thresholds.heart_rate,
+            ...(newState.thresholds.heart_rate || {})
+          },
+          spo2: {
+            ...adminOverride.thresholds.spo2,
+            ...(newState.thresholds.spo2 || {})
+          },
           temperature: {
-            ...newState.thresholds.temperature,
-            max: 48
+            ...adminOverride.thresholds.temperature,
+            ...(newState.thresholds.temperature || {}),
+            max: 48  // Enforce temperature max
+          },
+          gas: {
+            ...adminOverride.thresholds.gas,
+            ...(newState.thresholds.gas || {})
+          },
+          ultrasonic: {
+            ...adminOverride.thresholds.ultrasonic,
+            ...(newState.thresholds.ultrasonic || {})
           }
         };
       }
