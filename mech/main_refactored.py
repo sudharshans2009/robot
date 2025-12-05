@@ -75,8 +75,10 @@ RECONNECT_INTERVAL_MS = 5000
 class GasSensor:
     def __init__(self, pin):
         self.adc = ADC(Pin(pin))
-        self.clean_air_value = 65535
         self.threshold_ppm = 150
+        # Calibration: read baseline on startup
+        self.baseline = self.adc.read_u16()
+        print(f"  Gas baseline: {self.baseline}")
         
     def read_raw(self):
         """Read raw ADC value"""
@@ -85,25 +87,34 @@ class GasSensor:
     def read_ppm(self):
         """Read as approximated PPM"""
         raw = self.read_raw()
-        # Convert to percentage (0-100) based on raw value
-        # MQ sensors output higher voltage with more gas
-        # Raw value 0-65535 maps to sensor range
-        percentage = (raw / 65535.0) * 100
         
-        # Simple linear approximation for PPM
-        # Assuming max detectable ~10000 PPM at full scale
-        ppm = int((raw / 65535.0) * 10000)
-        return max(0, min(10000, ppm))
+        # Calculate percentage based on raw value
+        # Most MQ sensors: low ADC = clean air, high ADC = gas detected
+        # Scale 0-65535 to 0-100%
+        percent = (raw / 65535.0) * 100
+        
+        # If baseline is high (>50000), sensor outputs HIGH in clean air
+        # So we need to invert
+        if self.baseline > 50000:
+            percent = 100.0 - percent
+        
+        # Clamp to 0-100
+        percent = max(0, min(100, percent))
+        
+        # Convert to PPM (rough approximation)
+        ppm = int(percent * 100)  # 0-10000 PPM range
+        return ppm, percent
     
     def read(self):
         """Read comprehensive gas data"""
         raw = self.read_raw()
-        ppm = self.read_ppm()
+        ppm, percent = self.read_ppm()
         
         return {
             'ppm': ppm,
+            'percent': percent,
             'raw': raw,
-            'isHigh': ppm > self.threshold_ppm
+            'isHigh': percent > 30  # Alert if > 30%
         }
 
 # ============================================================================
@@ -680,10 +691,8 @@ class MechController:
         
         if self.gas:
             gas_data = self.gas.read()
-            # Convert PPM to percentage (0-100 scale, max PPM ~500)
-            percent = min(100, (gas_data['ppm'] / 500.0) * 100)
             payload['gas'] = {
-                'percent': percent,
+                'percent': round(gas_data['percent'], 1),
                 'ppm': gas_data['ppm'],
                 'raw': gas_data['raw'],
                 'alert': gas_data['isHigh']
