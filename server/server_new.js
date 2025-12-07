@@ -102,8 +102,10 @@ const adminOverride = {
   flex: {
     enabled: false,
     forwardToServos: false,
-    flex_1_2: { enabled: false, min: 45, max: 55 },
-    flex_3_4: { enabled: false, min: 45, max: 55 },
+    flex_1: { enabled: false, min: 45, max: 55 },
+    flex_2: { enabled: false, min: 45, max: 55 },
+    flex_3: { enabled: false, min: 45, max: 55 },
+    flex_4: { enabled: false, min: 45, max: 55 },
     flex_5: { enabled: false, min: 45, max: 55 }
   },
   biometric: {
@@ -181,16 +183,20 @@ function flexPercentToServoAngle(percent) {
 function getServoAnglesFromFlex(flexData) {
   const servos = {};
   
-  if (flexData.flex_1_2 !== undefined) {
-    const angle = flexPercentToServoAngle(flexData.flex_1_2);
-    servos.servo_1 = angle;
-    servos.servo_2 = angle;
+  if (flexData.flex_1 !== undefined) {
+    servos.servo_1 = flexPercentToServoAngle(flexData.flex_1);
   }
   
-  if (flexData.flex_3_4 !== undefined) {
-    const angle = flexPercentToServoAngle(flexData.flex_3_4);
-    servos.servo_3 = angle;
-    servos.servo_4 = angle;
+  if (flexData.flex_2 !== undefined) {
+    servos.servo_2 = flexPercentToServoAngle(flexData.flex_2);
+  }
+  
+  if (flexData.flex_3 !== undefined) {
+    servos.servo_3 = flexPercentToServoAngle(flexData.flex_3);
+  }
+  
+  if (flexData.flex_4 !== undefined) {
+    servos.servo_4 = flexPercentToServoAngle(flexData.flex_4);
   }
   
   if (flexData.flex_5 !== undefined) {
@@ -211,17 +217,31 @@ function applyFlexOverride(realFlexData) {
   
   const overridden = { ...realFlexData };
   
-  if (adminOverride.flex.flex_1_2.enabled) {
-    overridden.flex_1_2 = getRandomInRange(
-      adminOverride.flex.flex_1_2.min,
-      adminOverride.flex.flex_1_2.max
+  if (adminOverride.flex.flex_1.enabled) {
+    overridden.flex_1 = getRandomInRange(
+      adminOverride.flex.flex_1.min,
+      adminOverride.flex.flex_1.max
     );
   }
   
-  if (adminOverride.flex.flex_3_4.enabled) {
-    overridden.flex_3_4 = getRandomInRange(
-      adminOverride.flex.flex_3_4.min,
-      adminOverride.flex.flex_3_4.max
+  if (adminOverride.flex.flex_2.enabled) {
+    overridden.flex_2 = getRandomInRange(
+      adminOverride.flex.flex_2.min,
+      adminOverride.flex.flex_2.max
+    );
+  }
+  
+  if (adminOverride.flex.flex_3.enabled) {
+    overridden.flex_3 = getRandomInRange(
+      adminOverride.flex.flex_3.min,
+      adminOverride.flex.flex_3.max
+    );
+  }
+  
+  if (adminOverride.flex.flex_4.enabled) {
+    overridden.flex_4 = getRandomInRange(
+      adminOverride.flex.flex_4.min,
+      adminOverride.flex.flex_4.max
     );
   }
   

@@ -46,7 +46,7 @@ WIFI_SSID = "Karthikeyan G"
 WIFI_PASSWORD = "9842969931"
 
 # Server
-SERVER_IP = "10.40.94.143"
+SERVER_IP = "10.111.229.251"
 SERVER_PORT = 8081
 
 # Pin Assignments
@@ -54,9 +54,11 @@ MAX30102_SDA = 6
 MAX30102_SCL = 7
 EMERGENCY_BUTTON_PIN = 21
 EMERGENCY_LED_PIN = 20
-FLEX_1_2_PIN = 28  # GP28 A2 - controls servos 1-2
-FLEX_3_4_PIN = 27  # GP27 A1 - controls servos 3-4
-FLEX_5_PIN = 26    # GP26 A0 - controls servo 5
+FLEX_1_PIN = 28    # GP28 A2 - controls servo 1
+FLEX_2_PIN = 27    # GP27 A1 - controls servo 2
+FLEX_3_PIN = 26    # GP26 A0 - controls servo 3
+FLEX_4_PIN = 22    # GP22 - controls servo 4
+FLEX_5_PIN = 4     # GP4 - controls servo 5
 
 # Timing
 FLEX_SEND_INTERVAL_MS = 100
@@ -378,35 +380,76 @@ class EmergencyButton:
 # FLEX SENSORS
 # ============================================================================
 
+class FlexSensor:
+    def __init__(self, pin, sensor_id, invert=False):
+        self.adc = ADC(Pin(pin)) if pin else None
+        self.id = sensor_id
+        self.invert = invert
+        # Calibration values
+        self.min_val = 0
+        self.max_val = 65535
+        self.baseline = None
+        
+        if self.adc:
+            # Read baseline on startup
+            samples = []
+            for _ in range(10):
+                samples.append(self.adc.read_u16())
+                sleep_ms(10)
+            self.baseline = sum(samples) // len(samples)
+            print(f"  Flex {sensor_id} baseline: {self.baseline}")
+    
+    def read_raw(self):
+        """Read raw ADC value"""
+        if not self.adc:
+            return 32767
+        return self.adc.read_u16()
+    
+    def read_percent(self):
+        """Read as percentage 0-100"""
+        raw = self.read_raw()
+        
+        # Convert to percentage
+        percent = (raw / 65535.0) * 100.0
+        
+        # Invert if needed (depends on sensor orientation)
+        if self.invert:
+            percent = 100.0 - percent
+        
+        # Clamp to valid range
+        percent = max(0.0, min(100.0, percent))
+        
+        return round(percent, 1)
+
 class FlexSensors:
-    def __init__(self, pin_1_2, pin_3_4, pin_5):
-        self.adc_1_2 = ADC(Pin(pin_1_2)) if pin_1_2 else None
-        self.adc_3_4 = ADC(Pin(pin_3_4)) if pin_3_4 else None
-        self.adc_5 = ADC(Pin(pin_5)) if pin_5 else None
+    def __init__(self, pin_1, pin_2, pin_3, pin_4, pin_5):
+        # Initialize each sensor separately
+        # Adjust invert parameter based on your sensor orientation
+        self.flex_1 = FlexSensor(pin_1, 1, invert=True)
+        self.flex_2 = FlexSensor(pin_2, 2, invert=True)
+        self.flex_3 = FlexSensor(pin_3, 3, invert=True)
+        self.flex_4 = FlexSensor(pin_4, 4, invert=True)
+        self.flex_5 = FlexSensor(pin_5, 5, invert=False)
     
     def read(self):
-        """Read all flex sensors as percentages"""
-        data = {}
-        
-        if self.adc_1_2:
-            raw = self.adc_1_2.read_u16()
-            data['flex_1_2'] = 100.0 - ((raw / 65535.0) * 100.0)
-        else:
-            data['flex_1_2'] = 50.0
-        
-        if self.adc_3_4:
-            raw = self.adc_3_4.read_u16()
-            data['flex_3_4'] = 100.0 - ((raw / 65535.0) * 100.0)
-        else:
-            data['flex_3_4'] = 50.0
-        
-        if self.adc_5:
-            raw = self.adc_5.read_u16()
-            data['flex_5'] = (raw / 65535.0) * 100.0
-        else:
-            data['flex_5'] = 50.0
-        
-        return data
+        """Read all flex sensors as individual percentages"""
+        return {
+            'flex_1': self.flex_1.read_percent(),
+            'flex_2': self.flex_2.read_percent(),
+            'flex_3': self.flex_3.read_percent(),
+            'flex_4': self.flex_4.read_percent(),
+            'flex_5': self.flex_5.read_percent()
+        }
+    
+    def read_raw(self):
+        """Read all raw values for debugging"""
+        return {
+            'flex_1_raw': self.flex_1.read_raw(),
+            'flex_2_raw': self.flex_2.read_raw(),
+            'flex_3_raw': self.flex_3.read_raw(),
+            'flex_4_raw': self.flex_4.read_raw(),
+            'flex_5_raw': self.flex_5.read_raw()
+        }
 
 # ============================================================================
 # WEBSOCKET CLIENT
@@ -637,7 +680,7 @@ class HandController:
         
         # Initialize flex sensors
         print("Initializing flex sensors...")
-        self.flex = FlexSensors(FLEX_1_2_PIN, FLEX_3_4_PIN, FLEX_5_PIN)
+        self.flex = FlexSensors(FLEX_1_PIN, FLEX_2_PIN, FLEX_3_PIN, FLEX_4_PIN, FLEX_5_PIN)
         print("✓ Flex sensors ready")
         
         # Initialize emergency button

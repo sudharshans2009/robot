@@ -48,7 +48,7 @@ WIFI_SSID = "Karthikeyan G"
 WIFI_PASSWORD = "9842969931"
 
 # Server
-SERVER_IP = "10.40.94.143"
+SERVER_IP = "10.111.229.251"
 SERVER_PORT = 8081
 
 # Pin Assignments
