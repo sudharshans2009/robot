@@ -359,6 +359,42 @@
       margin-bottom: 1rem;
       font-size: 0.875rem;
     }
+
+    .reason-card {
+      margin-top: 1rem;
+      padding: 0.85rem;
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      border-radius: 0.5rem;
+      background: rgba(239, 68, 68, 0.08);
+    }
+
+    .reason-title {
+      font-weight: 700;
+      color: #fecaca;
+      margin-bottom: 0.4rem;
+      font-size: 0.9rem;
+    }
+
+    .reason-detail {
+      color: #fca5a5;
+      font-size: 0.82rem;
+      line-height: 1.35;
+      margin-bottom: 0.4rem;
+    }
+
+    .abnormal-list {
+      list-style: none;
+      display: grid;
+      gap: 0.35rem;
+    }
+
+    .abnormal-list li {
+      padding: 0.4rem 0.5rem;
+      border-radius: 0.35rem;
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 0.8rem;
+    }
     
     footer {
       text-align: center;
@@ -569,7 +605,7 @@
               </div>
               <div class="range-input">
                 <small>Max</small>
-                <input type="number" id="tempMax" value="25" min="10" max="50" step="0.5" onchange="updateOverride()">
+                <input type="number" id="tempMax" value="25" min="10" max="60" step="0.5" onchange="updateOverride()">
               </div>
             </div>
           </div>
@@ -620,11 +656,11 @@
               </div>
               <div class="range-input">
                 <small>Max Warn</small>
-                <input type="number" id="tempWarnMax" value="48" onchange="updateThresholds()">
+                <input type="number" id="tempWarnMax" value="50" onchange="updateThresholds()">
               </div>
               <div class="range-input">
                 <small>Critical High</small>
-                <input type="number" id="tempCritHigh" value="35" onchange="updateThresholds()">
+                <input type="number" id="tempCritHigh" value="55" onchange="updateThresholds()">
               </div>
             </div>
           </div>
@@ -644,6 +680,11 @@
           </div>
           
           <button onclick="resetThresholds()" class="warning" style="width: 100%; margin-top: 0.5rem;">Reset to Defaults</button>
+          <div class="btn-grid" style="margin-top: 0.5rem;">
+            <button onclick="setThresholdPreset('balanced')">Balanced</button>
+            <button onclick="setThresholdPreset('highTemp')">50/55C Profile</button>
+            <button onclick="setThresholdPreset('strict')">Strict</button>
+          </div>
         </div>
       </div>
       
@@ -666,6 +707,19 @@
           <div class="btn-group" style="margin-top: 1rem;">
             <button class="danger" onclick="triggerEmergency()">🚨 Trigger Emergency</button>
             <button class="success" onclick="clearEmergency()">✅ Clear Emergency</button>
+          </div>
+
+          <div class="btn-grid" style="margin-top: 0.75rem;">
+            <button onclick="applyScenario('heat')" class="danger">Heat Spike</button>
+            <button onclick="applyScenario('gas')" class="danger">Gas Leak</button>
+            <button onclick="applyScenario('distance')" class="warning">Obstacle Near</button>
+            <button onclick="applyScenario('multi')" class="danger">Multi-Critical</button>
+          </div>
+
+          <div class="reason-card">
+            <div class="reason-title" id="reasonTitle">No active emergency reason</div>
+            <div class="reason-detail" id="reasonDetail">Detailed abnormal readings will appear here when emergency is active.</div>
+            <ul class="abnormal-list" id="abnormalList"></ul>
           </div>
         </div>
       </div>
@@ -720,7 +774,7 @@
         ultrasonic: { min: 45, max: 55 }
       },
       thresholds: {
-        temperature: { min: 20, max: 48, critical_low: 15, critical_high: 35 },
+        temperature: { min: 20, max: 50, critical_low: 15, critical_high: 55 },
         gas: { min: 0, max: 30, critical_low: 0, critical_high: 50 }
       },
       autoEmergency: true
@@ -758,6 +812,12 @@
           const msg = JSON.parse(event.data);
           if (msg.type === 'admin.override_state' && msg.payload?.overrideState) {
             loadState(msg.payload.overrideState);
+          } else if (msg.type === 'emergency.status') {
+            renderEmergencyReason(msg.payload || {});
+          } else if (msg.type === 'server.vital_alert') {
+            renderVitalAlert(msg.payload || {});
+          } else if (msg.type === 'server.periodic_update' && msg.payload?.emergencyState) {
+            renderEmergencyReason(msg.payload.emergencyState);
           }
         } catch (e) {
           console.error('Parse error:', e);
@@ -826,10 +886,12 @@
           document.getElementById('tempWarnMin').value = state.thresholds.temperature.min;
           document.getElementById('tempWarnMax').value = state.thresholds.temperature.max;
           document.getElementById('tempCritHigh').value = state.thresholds.temperature.critical_high;
+          overrideState.thresholds.temperature = { ...state.thresholds.temperature };
         }
         if (state.thresholds.gas) {
           document.getElementById('gasWarnMax').value = state.thresholds.gas.max;
           document.getElementById('gasCritHigh').value = state.thresholds.gas.critical_high;
+          overrideState.thresholds.gas = { ...state.thresholds.gas };
         }
       }
       
@@ -1001,8 +1063,8 @@
         case 'danger':
           document.getElementById('gasMin').value = 58;
           document.getElementById('gasMax').value = 65;
-          document.getElementById('tempMin').value = 37;
-          document.getElementById('tempMax').value = 39;
+          document.getElementById('tempMin').value = 52;
+          document.getElementById('tempMax').value = 56;
           document.getElementById('distMin').value = 1;
           document.getElementById('distMax').value = 3;
           break;
@@ -1014,12 +1076,115 @@
     function resetThresholds() {
       document.getElementById('tempCritLow').value = 15;
       document.getElementById('tempWarnMin').value = 20;
-      document.getElementById('tempWarnMax').value = 48;
-      document.getElementById('tempCritHigh').value = 35;
+      document.getElementById('tempWarnMax').value = 50;
+      document.getElementById('tempCritHigh').value = 55;
       document.getElementById('gasWarnMax').value = 30;
       document.getElementById('gasCritHigh').value = 50;
       updateThresholds();
       log('Thresholds reset to defaults', 'warning');
+    }
+
+    function setThresholdPreset(preset) {
+      if (preset === 'balanced') {
+        document.getElementById('tempCritLow').value = 15;
+        document.getElementById('tempWarnMin').value = 20;
+        document.getElementById('tempWarnMax').value = 50;
+        document.getElementById('tempCritHigh').value = 55;
+      } else if (preset === 'highTemp') {
+        document.getElementById('tempCritLow').value = 16;
+        document.getElementById('tempWarnMin').value = 24;
+        document.getElementById('tempWarnMax').value = 50;
+        document.getElementById('tempCritHigh').value = 55;
+      } else if (preset === 'strict') {
+        document.getElementById('tempCritLow').value = 15;
+        document.getElementById('tempWarnMin').value = 20;
+        document.getElementById('tempWarnMax').value = 38;
+        document.getElementById('tempCritHigh').value = 45;
+      }
+
+      updateThresholds();
+      log(`Threshold preset applied: ${preset}`);
+    }
+
+    function applyScenario(scenario) {
+      document.getElementById('mechEnabled').checked = true;
+
+      if (scenario === 'heat') {
+        document.getElementById('gasMin').value = 4;
+        document.getElementById('gasMax').value = 9;
+        document.getElementById('tempMin').value = 52;
+        document.getElementById('tempMax').value = 56;
+        document.getElementById('distMin').value = 60;
+        document.getElementById('distMax').value = 90;
+      } else if (scenario === 'gas') {
+        document.getElementById('gasMin').value = 58;
+        document.getElementById('gasMax').value = 75;
+        document.getElementById('tempMin').value = 28;
+        document.getElementById('tempMax').value = 33;
+        document.getElementById('distMin').value = 55;
+        document.getElementById('distMax').value = 95;
+      } else if (scenario === 'distance') {
+        document.getElementById('gasMin').value = 6;
+        document.getElementById('gasMax').value = 10;
+        document.getElementById('tempMin').value = 25;
+        document.getElementById('tempMax').value = 30;
+        document.getElementById('distMin').value = 1;
+        document.getElementById('distMax').value = 4;
+      } else if (scenario === 'multi') {
+        document.getElementById('gasMin').value = 60;
+        document.getElementById('gasMax').value = 80;
+        document.getElementById('tempMin').value = 53;
+        document.getElementById('tempMax').value = 57;
+        document.getElementById('distMin').value = 1;
+        document.getElementById('distMax').value = 3;
+      }
+
+      updateOverride();
+      log(`Scenario applied: ${scenario}`, 'warning');
+    }
+
+    function renderVitalAlert(payload) {
+      if (!payload?.level || !Array.isArray(payload.abnormal)) return;
+      if (payload.abnormal.length === 0) return;
+      const summary = payload.abnormal
+        .map(item => `${item.sensor}=${item.value}${item.unit || ''} (${item.status || item.level})`)
+        .join(', ');
+      log(`Vital ${payload.level}: ${summary}`, payload.level === 'emergency' ? 'danger' : 'warning');
+    }
+
+    function renderEmergencyReason(emergency) {
+      const titleEl = document.getElementById('reasonTitle');
+      const detailEl = document.getElementById('reasonDetail');
+      const listEl = document.getElementById('abnormalList');
+
+      if (!emergency?.active) {
+        titleEl.textContent = 'No active emergency reason';
+        detailEl.textContent = 'Detailed abnormal readings will appear here when emergency is active.';
+        listEl.innerHTML = '';
+        return;
+      }
+
+      const reason = emergency.reason || {};
+      titleEl.textContent = reason.summary || 'Emergency active';
+      detailEl.textContent = reason.detailText || 'Emergency is active but no detailed reason payload was provided.';
+
+      const readings = Array.isArray(reason.abnormalReadings)
+        ? reason.abnormalReadings
+        : (Array.isArray(emergency.triggeredBy) ? emergency.triggeredBy : []);
+
+      if (readings.length === 0) {
+        listEl.innerHTML = '<li>No abnormal readings attached to this emergency event.</li>';
+        return;
+      }
+
+      listEl.innerHTML = readings.map(item => {
+        const unit = item.unit || '';
+        const status = item.status ? String(item.status).replace(/_/g, ' ') : (item.level || 'unknown');
+        const threshold = item.threshold !== undefined ? ` | threshold: ${item.threshold}${unit}` : '';
+        const deviation = item.deviation !== undefined ? ` | deviation: ${item.deviation}${unit}` : '';
+        const message = item.message || `${item.sensor}: ${item.value}${unit} (${status})`;
+        return `<li><strong>${item.sensor || 'sensor'}</strong> -> ${message}${threshold}${deviation}</li>`;
+      }).join('');
     }
     
     // ========================================

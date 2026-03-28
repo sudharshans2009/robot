@@ -44,15 +44,16 @@ import ds18x20
 
 # WiFi
 # WiFi
-WIFI_SSID = "Karthikeyan G"
-WIFI_PASSWORD = "9842969931"
+WIFI_SSID = "Dharani's A36"
+WIFI_PASSWORD = "1357924680"
 
 # Server
-SERVER_IP = "10.111.229.251"
+SERVER_IP = "10.100.31.251"
 SERVER_PORT = 8081
 
 # Pin Assignments
 SERVO_PINS = [10, 11, 12, 14, 15]  # GP10, GP11, GP12, GP14, GP15
+EXHAUST_FAN_PIN = 8
 GAS_PIN = 26
 TEMP_PIN = 27
 ULTRASONIC_TRIG = 20
@@ -67,6 +68,7 @@ SERVO_DEFAULT = 90
 # Timing
 SENSOR_SEND_INTERVAL_MS = 1000
 RECONNECT_INTERVAL_MS = 5000
+WIFI_RECONNECT_INTERVAL_MS = 10000
 
 # ============================================================================
 # GAS SENSOR
@@ -300,6 +302,20 @@ class ServoController:
             except:
                 pass
 
+
+class ExhaustFan:
+    def __init__(self, pin):
+        self.pin = Pin(pin, Pin.OUT)
+        self.state = False
+        self.set_state(False)
+
+    def set_state(self, active):
+        self.state = bool(active)
+        self.pin.value(1 if self.state else 0)
+
+    def is_active(self):
+        return self.state
+
 # ============================================================================
 # WEBSOCKET CLIENT
 # ============================================================================
@@ -397,9 +413,31 @@ class WebSocketClient:
             self.sock.send(frame)
             return True
             
+        except OSError as e:
+            err_no = e.args[0] if e.args else None
+            if err_no == 113:
+                print("✗ Send error: EHOSTUNREACH (server unreachable)")
+            else:
+                print(f"✗ Send error: {e}")
+
+            self.connected = False
+            if self.sock:
+                try:
+                    self.sock.close()
+                except:
+                    pass
+                self.sock = None
+            return False
+
         except Exception as e:
             print(f"✗ Send error: {e}")
             self.connected = False
+            if self.sock:
+                try:
+                    self.sock.close()
+                except:
+                    pass
+                self.sock = None
             return False
     
     def recv(self):
@@ -533,6 +571,15 @@ class MechController:
         except Exception as e:
             print(f"✗ Ultrasonic error: {e}")
             self.ultrasonic = None
+
+        # Initialize exhaust fan
+        print("Initializing exhaust fan...")
+        try:
+            self.exhaust_fan = ExhaustFan(EXHAUST_FAN_PIN)
+            print(f"✓ Exhaust fan ready on GP{EXHAUST_FAN_PIN}")
+        except Exception as e:
+            print(f"✗ Exhaust fan error: {e}")
+            self.exhaust_fan = None
         
         # Network
         self.wlan = network.WLAN(network.STA_IF)
@@ -544,6 +591,7 @@ class MechController:
         # Timing
         self.last_sensor_send = 0
         self.last_reconnect = 0
+        self.last_wifi_check = 0
     
     def connect_wifi(self):
         """Connect to WiFi"""
@@ -662,6 +710,13 @@ class MechController:
                     if angles:
                         self.servo_ctrl.set_all(angles)
                         print(f"  Servos → {angles}")
+
+            # Handle exhaust fan control
+            elif msg_type in ('server.control_exhaust', 'site.control_exhaust', 'control_exhaust'):
+                active = bool(payload.get('active', False))
+                if self.exhaust_fan:
+                    self.exhaust_fan.set_state(active)
+                    print(f"  Exhaust fan → {'ON' if active else 'OFF'}")
             
             # Handle emergency
             elif msg_type in ('emergency.status', 'emergency_status'):
@@ -703,6 +758,9 @@ class MechController:
         
         if self.ultrasonic:
             payload['distance_cm'] = self.ultrasonic.read()
+
+        if self.exhaust_fan:
+            payload['exhaust_fan_active'] = self.exhaust_fan.is_active()
         
         # Send
         msg = create_message('mech.sensor_data', payload)
@@ -727,6 +785,13 @@ class MechController:
         try:
             while True:
                 now = ticks_ms()
+
+                # Keep WiFi alive
+                if ticks_diff(now, self.last_wifi_check) > WIFI_RECONNECT_INTERVAL_MS:
+                    self.last_wifi_check = now
+                    if not self.wlan.isconnected():
+                        print("\n📶 WiFi lost - reconnecting...")
+                        self.connect_wifi()
                 
                 # Reconnect check
                 if (not self.ws or not self.ws.connected) and self.wlan.isconnected():

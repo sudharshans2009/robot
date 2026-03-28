@@ -81,6 +81,7 @@ const latestData = {
     gas: null,
     temperature: null,
     ultrasonic: null,
+    exhaustFan: null,
     timestamp: null
   }
 };
@@ -91,6 +92,7 @@ const emergencyState = {
   autoTriggered: false,
   manualTriggered: false,
   triggeredBy: [],
+  reason: null,
   timestamp: null,
   cooldownUntil: 0
 };
@@ -102,10 +104,8 @@ const adminOverride = {
   flex: {
     enabled: false,
     forwardToServos: false,
-    flex_1: { enabled: false, min: 45, max: 55 },
-    flex_2: { enabled: false, min: 45, max: 55 },
-    flex_3: { enabled: false, min: 45, max: 55 },
-    flex_4: { enabled: false, min: 45, max: 55 },
+    flex_1_2: { enabled: false, min: 45, max: 55 },
+    flex_3_4: { enabled: false, min: 45, max: 55 },
     flex_5: { enabled: false, min: 45, max: 55 }
   },
   biometric: {
@@ -122,7 +122,7 @@ const adminOverride = {
   thresholds: {
     heart_rate: { min: 60, max: 100, critical_low: 40, critical_high: 150 },
     spo2: { min: 95, max: 100, critical_low: 85, critical_high: 100 },
-    temperature: { min: 20, max: 48, critical_low: 15, critical_high: 35 },
+    temperature: { min: 20, max: 50, critical_low: 15, critical_high: 55 },
     gas: { min: 0, max: 30, critical_low: 0, critical_high: 50 },
     ultrasonic: { min: 5, max: 10000, critical_low: 0, critical_high: 2000 }
   },
@@ -136,6 +136,87 @@ const adminOverride = {
 function getRandomInRange(min, max, decimals = 1) {
   const value = min + Math.random() * (max - min);
   return decimals === 0 ? Math.round(value) : parseFloat(value.toFixed(decimals));
+}
+
+function asNumber(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function normalizeTemperatureThresholds(tempConfig = {}) {
+  const defaults = { min: 20, max: 50, critical_low: 15, critical_high: 55 };
+  const merged = {
+    critical_low: asNumber(tempConfig.critical_low, defaults.critical_low),
+    min: asNumber(tempConfig.min, defaults.min),
+    max: asNumber(tempConfig.max, defaults.max),
+    critical_high: asNumber(tempConfig.critical_high, defaults.critical_high)
+  };
+
+  merged.max = Math.min(50, Math.max(merged.max, merged.min));
+  merged.critical_high = Math.max(merged.critical_high, merged.max + 0.5);
+  merged.critical_high = Math.min(55, merged.critical_high);
+
+  if (merged.critical_high <= merged.max) {
+    merged.max = Math.max(merged.critical_low + 1, merged.critical_high - 0.5);
+  }
+
+  if (merged.min <= merged.critical_low) {
+    merged.min = merged.critical_low + 0.5;
+  }
+
+  return merged;
+}
+
+function getSensorUnit(sensor) {
+  switch (sensor) {
+    case "temperature":
+      return "°C";
+    case "gas":
+      return "%";
+    case "ultrasonic":
+      return "cm";
+    default:
+      return "";
+  }
+}
+
+function createAbnormalReading(sensor, value, level, status, threshold) {
+  const unit = getSensorUnit(sensor);
+  return {
+    sensor,
+    value,
+    level,
+    status,
+    threshold,
+    unit,
+    deviation: parseFloat(Math.abs(value - threshold).toFixed(1)),
+    message: `${sensor} is ${status.replace(/_/g, " ")}: ${value}${unit} (limit ${threshold}${unit})`
+  };
+}
+
+function buildEmergencyReason(reason, abnormal) {
+  const detailed = abnormal.map(item => ({
+    sensor: item.sensor,
+    level: item.level,
+    status: item.status,
+    value: item.value,
+    threshold: item.threshold,
+    deviation: item.deviation,
+    unit: item.unit,
+    message: item.message
+  }));
+
+  const detailText = detailed.length > 0
+    ? detailed
+      .map(d => `${d.sensor.toUpperCase()}: ${d.value}${d.unit} (${d.status.replace(/_/g, " ")}, threshold ${d.threshold}${d.unit}, deviation ${d.deviation}${d.unit}, ${d.level})`)
+      .join(" | ")
+    : "No abnormal readings";
+
+  return {
+    summary: reason,
+    detailText,
+    abnormalReadings: detailed
+  };
 }
 
 function createMessage(type, source, target, payload) {
@@ -217,35 +298,21 @@ function applyFlexOverride(realFlexData) {
   
   const overridden = { ...realFlexData };
   
-  if (adminOverride.flex.flex_1.enabled) {
-    overridden.flex_1 = getRandomInRange(
-      adminOverride.flex.flex_1.min,
-      adminOverride.flex.flex_1.max
+  if (adminOverride.flex.flex_1_2?.enabled) {
+    overridden.flex_1_2 = getRandomInRange(
+      adminOverride.flex.flex_1_2.min,
+      adminOverride.flex.flex_1_2.max
     );
   }
   
-  if (adminOverride.flex.flex_2.enabled) {
-    overridden.flex_2 = getRandomInRange(
-      adminOverride.flex.flex_2.min,
-      adminOverride.flex.flex_2.max
+  if (adminOverride.flex.flex_3_4?.enabled) {
+    overridden.flex_3_4 = getRandomInRange(
+      adminOverride.flex.flex_3_4.min,
+      adminOverride.flex.flex_3_4.max
     );
   }
   
-  if (adminOverride.flex.flex_3.enabled) {
-    overridden.flex_3 = getRandomInRange(
-      adminOverride.flex.flex_3.min,
-      adminOverride.flex.flex_3.max
-    );
-  }
-  
-  if (adminOverride.flex.flex_4.enabled) {
-    overridden.flex_4 = getRandomInRange(
-      adminOverride.flex.flex_4.min,
-      adminOverride.flex.flex_4.max
-    );
-  }
-  
-  if (adminOverride.flex.flex_5.enabled) {
+  if (adminOverride.flex.flex_5?.enabled) {
     overridden.flex_5 = getRandomInRange(
       adminOverride.flex.flex_5.min,
       adminOverride.flex.flex_5.max
@@ -317,27 +384,43 @@ function checkVitals() {
   if (latestData.mech.temperature !== null) {
     const temp = latestData.mech.temperature;
     if (temp < thresholds.temperature.critical_low || temp > thresholds.temperature.critical_high) {
-      abnormal.push({ sensor: "temperature", value: temp, level: "critical" });
+      abnormal.push(
+        createAbnormalReading(
+          "temperature",
+          temp,
+          "critical",
+          temp > thresholds.temperature.critical_high ? "above_critical_high" : "below_critical_low",
+          temp > thresholds.temperature.critical_high ? thresholds.temperature.critical_high : thresholds.temperature.critical_low
+        )
+      );
     } else if (temp < thresholds.temperature.min || temp > thresholds.temperature.max) {
-      abnormal.push({ sensor: "temperature", value: temp, level: "warning" });
+      abnormal.push(
+        createAbnormalReading(
+          "temperature",
+          temp,
+          "warning",
+          temp > thresholds.temperature.max ? "above_warning_max" : "below_warning_min",
+          temp > thresholds.temperature.max ? thresholds.temperature.max : thresholds.temperature.min
+        )
+      );
     }
   }
   
   if (latestData.mech.gas?.percent !== undefined) {
     const gas = latestData.mech.gas.percent;
     if (gas > thresholds.gas.critical_high) {
-      abnormal.push({ sensor: "gas", value: gas, level: "critical" });
+      abnormal.push(createAbnormalReading("gas", gas, "critical", "above_critical_high", thresholds.gas.critical_high));
     } else if (gas > thresholds.gas.max) {
-      abnormal.push({ sensor: "gas", value: gas, level: "warning" });
+      abnormal.push(createAbnormalReading("gas", gas, "warning", "above_warning_max", thresholds.gas.max));
     }
   }
   
   if (latestData.mech.ultrasonic !== null) {
     const dist = latestData.mech.ultrasonic;
     if (dist < thresholds.ultrasonic.critical_low) {
-      abnormal.push({ sensor: "ultrasonic", value: dist, level: "critical" });
+      abnormal.push(createAbnormalReading("ultrasonic", dist, "critical", "below_critical_low", thresholds.ultrasonic.critical_low));
     } else if (dist < thresholds.ultrasonic.min) {
-      abnormal.push({ sensor: "ultrasonic", value: dist, level: "warning" });
+      abnormal.push(createAbnormalReading("ultrasonic", dist, "warning", "below_warning_min", thresholds.ultrasonic.min));
     }
   }
   
@@ -370,14 +453,16 @@ function triggerAutoEmergency(reason, abnormal) {
   emergencyState.active = true;
   emergencyState.level = "emergency";
   emergencyState.autoTriggered = true;
+  emergencyState.manualTriggered = false;
   emergencyState.triggeredBy = abnormal;
+  emergencyState.reason = buildEmergencyReason(reason, abnormal);
   emergencyState.timestamp = now;
   emergencyState.cooldownUntil = now + 30000;
   
   console.log("\n" + "=".repeat(60));
   console.log("🚨 AUTO-EMERGENCY TRIGGERED");
-  console.log(`Reason: ${reason}`);
-  console.log(`Sensors: ${abnormal.map(a => `${a.sensor}: ${a.value}`).join(", ")}`);
+  console.log(`Reason: ${emergencyState.reason.summary}`);
+  console.log(`Details: ${emergencyState.reason.detailText}`);
   console.log("=".repeat(60) + "\n");
   
   // Notify mech to lock servos
@@ -385,7 +470,10 @@ function triggerAutoEmergency(reason, abnormal) {
     "emergency.alert",
     "server",
     "mech",
-    { active: true }
+    {
+      active: true,
+      reason: emergencyState.reason
+    }
   ));
   
   // Broadcast to all
@@ -398,6 +486,7 @@ function clearEmergency() {
   emergencyState.autoTriggered = false;
   emergencyState.manualTriggered = false;
   emergencyState.triggeredBy = [];
+  emergencyState.reason = null;
   emergencyState.timestamp = Date.now();
   
   console.log("[EMERGENCY] Cleared");
@@ -407,7 +496,7 @@ function clearEmergency() {
     "emergency.alert",
     "server",
     "mech",
-    { active: false }
+    { active: false, reason: null }
   ));
   
   broadcastEmergencyStatus();
@@ -423,7 +512,8 @@ function broadcastEmergencyStatus() {
       level: emergencyState.level,
       autoTriggered: emergencyState.autoTriggered,
       manualTriggered: emergencyState.manualTriggered,
-      triggeredBy: emergencyState.triggeredBy
+      triggeredBy: emergencyState.triggeredBy,
+      reason: emergencyState.reason
     }
   );
   
@@ -487,7 +577,16 @@ function handleHandMessage(ws, data) {
       const isActive = payload.active;
       
       emergencyState.active = isActive;
+      emergencyState.autoTriggered = false;
       emergencyState.manualTriggered = isActive;
+      emergencyState.triggeredBy = [];
+      emergencyState.reason = isActive
+        ? {
+          summary: "Manual emergency triggered by hand controller",
+          detailText: "Operator activated emergency mode manually from hand controller.",
+          abnormalReadings: []
+        }
+        : null;
       emergencyState.timestamp = Date.now();
       
       if (!isActive) {
@@ -501,7 +600,7 @@ function handleHandMessage(ws, data) {
           "emergency.alert",
           "server",
           "mech",
-          { active: true }
+          { active: true, reason: emergencyState.reason }
         ));
       }
       break;
@@ -528,6 +627,7 @@ function handleMechMessage(ws, data) {
       latestData.mech.gas = payload.gas;
       latestData.mech.temperature = payload.temperature_c;
       latestData.mech.ultrasonic = payload.distance_cm;
+      latestData.mech.exhaustFan = payload.exhaust_fan_active;
       latestData.mech.timestamp = Date.now();
       
       console.log(`[MECH] Gas: ${payload.gas?.percent?.toFixed(1) || "N/A"}%, Temp: ${payload.temperature_c?.toFixed(1) || "N/A"}°C, Dist: ${payload.distance_cm?.toFixed(1) || "N/A"}cm`);
@@ -588,11 +688,34 @@ function handleSiteMessage(ws, data) {
       ));
       break;
     }
+
+    case "site.control_exhaust":
+    case "control_exhaust": {
+      const active = !!payload.active;
+      console.log(`[SITE] Exhaust fan: ${active ? "ON" : "OFF"}`);
+
+      sendToClient(clients.mech, createMessage(
+        "server.control_exhaust",
+        "server",
+        "mech",
+        { active }
+      ));
+      break;
+    }
     
     case "emergency_alert": {
       const isActive = data.active;
       emergencyState.active = isActive;
+      emergencyState.autoTriggered = false;
       emergencyState.manualTriggered = isActive;
+      emergencyState.triggeredBy = [];
+      emergencyState.reason = isActive
+        ? {
+          summary: "Manual emergency triggered from site/admin",
+          detailText: "Emergency mode activated by a remote operator from site/admin control.",
+          abnormalReadings: []
+        }
+        : null;
       emergencyState.timestamp = Date.now();
       
       console.log(`[SITE] 🚨 Emergency: ${isActive ? "TRIGGERED" : "CLEARED"}`);
@@ -602,7 +725,7 @@ function handleSiteMessage(ws, data) {
           "emergency.alert",
           "server",
           "mech",
-          { active: true }
+          { active: true, reason: emergencyState.reason }
         ));
       }
       
@@ -644,9 +767,10 @@ function handleAdminMessage(ws, data) {
             ...(newState.thresholds.spo2 || {})
           },
           temperature: {
-            ...adminOverride.thresholds.temperature,
-            ...(newState.thresholds.temperature || {}),
-            max: 48  // Enforce temperature max
+            ...normalizeTemperatureThresholds({
+              ...adminOverride.thresholds.temperature,
+              ...(newState.thresholds.temperature || {})
+            })
           },
           gas: {
             ...adminOverride.thresholds.gas,
@@ -745,7 +869,9 @@ wss.on("connection", (ws) => {
                   active: emergencyState.active,
                   level: emergencyState.level,
                   autoTriggered: emergencyState.autoTriggered,
-                  manualTriggered: emergencyState.manualTriggered
+                  manualTriggered: emergencyState.manualTriggered,
+                  triggeredBy: emergencyState.triggeredBy,
+                  reason: emergencyState.reason
                 }
               }
             )));
@@ -857,7 +983,8 @@ setInterval(() => {
         level: emergencyState.level,
         autoTriggered: emergencyState.autoTriggered,
         manualTriggered: emergencyState.manualTriggered,
-        triggeredBy: emergencyState.triggeredBy
+        triggeredBy: emergencyState.triggeredBy,
+        reason: emergencyState.reason
       }
     }
   );

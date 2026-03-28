@@ -540,6 +540,21 @@
           </div>
         </div>
       </div>
+
+      <!-- Exhaust Fan -->
+      <div class="card">
+        <h2>🌀 Exhaust Fan (GP8)</h2>
+        <div class="data-row">
+          <span class="data-label">Status</span>
+          <span class="data-value" id="exhaustFanStatus">OFF</span>
+        </div>
+        <div class="control-section">
+          <div class="btn-group" style="grid-template-columns: 1fr 1fr;">
+            <button class="success" onclick="setExhaustFan(true)">Turn ON</button>
+            <button class="secondary" onclick="setExhaustFan(false)">Turn OFF</button>
+          </div>
+        </div>
+      </div>
     </div>
     
     <footer>
@@ -646,6 +661,11 @@
         if (mech.gas) updateGas(mech.gas);
         if (mech.temperature !== undefined) updateTemp(mech.temperature);
         if (mech.ultrasonic !== undefined) updateDist(mech.ultrasonic);
+        if (mech.exhaustFan !== undefined) {
+          updateExhaustFan(mech.exhaustFan);
+        } else if (mech.exhaust_fan_active !== undefined) {
+          updateExhaustFan(mech.exhaust_fan_active);
+        }
       }
       
       // Emergency
@@ -706,6 +726,11 @@
       document.getElementById('distCm').textContent = `${dist.toFixed(1)} cm`;
       document.getElementById('distIn').textContent = `${(dist / 2.54).toFixed(1)} in`;
       document.getElementById('distProgress').style.width = `${Math.min(dist / 2, 100)}%`;
+    }
+
+    function updateExhaustFan(active) {
+      document.getElementById('exhaustFanStatus').textContent = active ? 'ON' : 'OFF';
+      document.getElementById('exhaustFanStatus').style.color = active ? 'var(--success)' : 'var(--text)';
     }
     
     function updateEmergency(state) {
@@ -830,6 +855,19 @@
       
       ws.send(JSON.stringify({
         type: 'emergency_ack',
+        timestamp: Date.now()
+      }));
+    }
+
+    function setExhaustFan(active) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        alert('Not connected');
+        return;
+      }
+
+      ws.send(JSON.stringify({
+        type: 'control_exhaust',
+        active,
         timestamp: Date.now()
       }));
     }

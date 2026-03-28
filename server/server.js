@@ -76,6 +76,7 @@ const latestData = {
     gas: null,
     temperature: null,
     ultrasonic: null,
+    exhaustFan: null,
     timestamp: null,
   },
 };
@@ -846,6 +847,7 @@ wss.on("connection", (ws) => {
           latestData.mech.gas = payload.gas;
           latestData.mech.temperature = payload.temperature_c;
           latestData.mech.ultrasonic = payload.distance_cm;
+          latestData.mech.exhaustFan = payload.exhaust_fan_active;
           latestData.mech.timestamp = Date.now();
 
           // Apply admin override if enabled (only affects ML history with actual data)
@@ -913,6 +915,23 @@ wss.on("connection", (ws) => {
               source: "website",
               servos: data.servos,
               emergencyOverride: data.emergencyOverride || false,
+            })
+          );
+        }
+      }
+
+      // Handle exhaust fan control from website
+      if (clientType === "site" && data.type === "control_exhaust") {
+        const active = !!data.active;
+        console.log(`[SITE] Exhaust fan: ${active ? "ON" : "OFF"}`);
+
+        // Forward to mech
+        if (clients.mech && clients.mech.readyState === WebSocket.OPEN) {
+          clients.mech.send(
+            JSON.stringify({
+              type: "control_exhaust",
+              active,
+              source: "website",
             })
           );
         }

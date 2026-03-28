@@ -23,7 +23,7 @@ from ucollections import deque
 
 WIFI_SSID = "Karthikeyan G"
 WIFI_PASSWORD = "9842969931"
-SERVER_IP = "10.215.4.143"
+SERVER_IP = "10.141.6.251"
 SERVER_PORT = 8081
 
 MAX30102_SDA = 6
@@ -68,17 +68,10 @@ class CircularBuffer:
         self.data = deque((), self.max_size, True)
 
     def pop_head(self):
-        buffer_size = len(self.data)
-        temp = self.data
-        if buffer_size == 1:
-            pass
-        elif buffer_size > 1:
-            self.data.clear()
-            for x in range(buffer_size - 1):
-                self.data = temp.popleft()
-        else:
+        """Pop from head without corrupting buffer when full."""
+        if not self.data:
             return 0
-        return temp.popleft()
+        return self.data.popleft()
 
 
 # ============================================================================
@@ -652,8 +645,8 @@ class MAX30102:
         red, ir = self.read_fifo()
         return red > 50000 and ir > 50000
     
-    def collect_samples(self, duration=6):
-        """Collect samples for HR/SpO2 analysis"""
+    def collect_samples(self, duration=6, tick_hook=None):
+        """Collect samples for HR/SpO2 analysis; tick_hook runs each loop."""
         print(f"Collecting samples for {duration}s (keep finger still)...")
         
         self.red_buffer = []
@@ -676,6 +669,13 @@ class MAX30102:
             if elapsed > last_print:
                 print(f"  {elapsed}/{duration}s - {sample_count} samples...")
                 last_print = elapsed
+
+            # Allow external tasks (emergency button, blink) during capture
+            if tick_hook:
+                try:
+                    tick_hook()
+                except Exception:
+                    pass
             
             time.sleep(0.01)
         
@@ -793,7 +793,7 @@ class MAX30102:
         else:
             return spo2, "Out of range"
     
-    def measure(self):
+    def measure(self, tick_hook=None):
         """Perform complete HR and SpO2 measurement"""
         # Check if finger is present
         if not self.check_finger():
@@ -806,7 +806,7 @@ class MAX30102:
             }
         
         # Collect samples
-        if not self.collect_samples(duration=6):
+        if not self.collect_samples(duration=6, tick_hook=tick_hook):
             return {
                 'heart_rate': 0,
                 'spo2': 0,
@@ -1254,7 +1254,7 @@ class HandController:
             self.wlan.active(True)
             self.wlan.connect(WIFI_SSID, WIFI_PASSWORD)
             
-            timeout = 10
+            timeout = 20  # give WiFi more time to associate
             while timeout > 0:
                 status = self.wlan.status()
                 if self.wlan.isconnected():
@@ -1306,7 +1306,7 @@ class HandController:
             return None
         
         try:
-            result = self.max30102.measure()
+            result = self.max30102.measure(tick_hook=self.handle_measurement_tick)
             return result
         except Exception as e:
             print("✗ Measurement error: " + str(e))
@@ -1319,7 +1319,7 @@ class HandController:
             return False
         
         message = {
-            'type': 'max30102_data',
+            'type': 'hand.biometric_data',
             'payload': {
                 'heart_rate': data['heart_rate'],
                 'spo2': data['spo2'],
@@ -1340,13 +1340,12 @@ class HandController:
             return False
         
         message = {
-            'type': 'emergency',
+            'type': 'hand.emergency_manual',
             'payload': {
                 'active': active,
                 'timestamp': time.time()
             }
         }
-        
         result = self.ws.send(message)
         if not result:
             # Mark as disconnected if send fails
@@ -1424,7 +1423,7 @@ class HandController:
             return False
         
         message = {
-            'type': 'flex_data',
+            'type': 'hand.flex_data',
             'payload': {
                 'flex_1_2': flex_1_2,
                 'flex_3_4': flex_3_4,
@@ -1438,6 +1437,31 @@ class HandController:
             # Mark as disconnected on send failure
             self.ws.connected = False
         return result
+
+    def handle_measurement_tick(self):
+        """Allow emergency interactions during blocking measurements."""
+        # Update blink state for auto-emergency
+        self.emergency.update_blink()
+
+        # Process manual button presses during measurement
+        if self.emergency.check():
+            if self.emergency.auto_emergency_active:
+                self.emergency.set_auto_emergency(False)
+                if self.ws and self.ws.connected:
+                    try:
+                        self.ws.send({'type': 'emergency_ack', 'timestamp': time.time()})
+                    except Exception:
+                        self.ws.connected = False
+                print("\n✓ Auto-emergency acknowledged during measurement\n")
+            else:
+                is_active = self.emergency.toggle()
+                if self.ws and self.ws.connected:
+                    try:
+                        self.send_emergency_alert(is_active)
+                    except Exception:
+                        self.ws.connected = False
+                else:
+                    print("⚠ Emergency state saved, will send when connected")
     
     def run(self):
         wifi_connected = self.connect_wifi()
@@ -1562,32 +1586,27 @@ class HandController:
                 if websocket_connected and self.ws and self.ws.connected and ticks_diff(current_time, last_servo_send) > servo_send_interval:
                     last_servo_send = current_time
                     
-                    # Read sensors and send data
-                    servos = self.read_flex_sensors()
-                    send_ok = self.send_servo_control(servos)
-                    
-                    if send_ok:
-                        # Also send flex data for display
-                        if self.flex_servos_1_2:
-                            raw_1_2 = self.flex_servos_1_2.read_u16()
-                            flex_1_2_percent = 100.0 - ((raw_1_2 / 65535.0) * 100.0)
-                        else:
-                            flex_1_2_percent = 0
-                        
-                        if self.flex_servos_3_4:
-                            raw_3_4 = self.flex_servos_3_4.read_u16()
-                            flex_3_4_percent = 100.0 - ((raw_3_4 / 65535.0) * 100.0)
-                        else:
-                            flex_3_4_percent = 0
-                        
-                        if self.flex_servo_5:
-                            raw_5 = self.flex_servo_5.read_u16()
-                            flex_5_percent = (raw_5 / 65535.0) * 100.0
-                        else:
-                            flex_5_percent = 0
-                        
-                        self.send_flex_data(flex_1_2_percent, flex_3_4_percent, flex_5_percent)
+                    # Read sensors and send flex percentages (server converts to servo angles)
+                    if self.flex_servos_1_2:
+                        raw_1_2 = self.flex_servos_1_2.read_u16()
+                        flex_1_2_percent = 100.0 - ((raw_1_2 / 65535.0) * 100.0)
                     else:
+                        flex_1_2_percent = 0
+                    
+                    if self.flex_servos_3_4:
+                        raw_3_4 = self.flex_servos_3_4.read_u16()
+                        flex_3_4_percent = 100.0 - ((raw_3_4 / 65535.0) * 100.0)
+                    else:
+                        flex_3_4_percent = 0
+                    
+                    if self.flex_servo_5:
+                        raw_5 = self.flex_servo_5.read_u16()
+                        flex_5_percent = (raw_5 / 65535.0) * 100.0
+                    else:
+                        flex_5_percent = 0
+                    
+                    send_ok = self.send_flex_data(flex_1_2_percent, flex_3_4_percent, flex_5_percent)
+                    if not send_ok:
                         # Send failed, will trigger reconnect
                         websocket_connected = False
                 

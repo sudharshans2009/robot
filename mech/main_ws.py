@@ -26,7 +26,7 @@ import ustruct
 # WS_PORT = 8081
 WIFI_SSID = "Karthikeyan G"
 WIFI_PASSWORD = "9842969931"
-WS_SERVER = "10.222.185.143"
+WS_SERVER = "10.141.6.251"
 WS_PORT = 8081
 
 # ==================== WEBSOCKET CLIENT ====================
