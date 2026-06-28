@@ -1,75 +1,80 @@
-// WebSocket Server for Robot Hand & Mech Communication
-// Handles communication between hand sensors, mechanical hand, and web interface
+/**
+ * ============================================================================
+ * ROBOT CONTROL SERVER - Refactored Version
+ * ============================================================================
+ * 
+ * Role: Central WebSocket server and state manager for the robotics system.
+ * 
+ * Message Types Handled:
+ * - From Hand: hand.flex_data, hand.biometric_data, hand.emergency_manual
+ * - From Mech: mech.sensor_data
+ * - From Site: site.control_servo, site.control_servos, site.emergency_ack
+ * - From Admin: admin.override_state
+ * - Broadcast: emergency.status, server.periodic_update
+ * 
+ * Configuration:
+ * - HTTP_PORT: 3001 (Express static server)
+ * - WS_PORT: 8081 (WebSocket server)
+ * 
+ * Migration Notes:
+ * - New message schema uses dot notation (e.g., "hand.flex_data" vs "flex_data")
+ * - All messages include source, target, payload, timestamp fields
+ * - Flex override now has per-sensor enable and forwardToServos option
+ * - To switch: rename this file to server.js after testing
+ * ============================================================================
+ */
 
 const WebSocket = require("ws");
 const express = require("express");
 const path = require("path");
 
-const app = express();
-const PORT = 3001; // Changed from 3000 to avoid conflict
-const WS_PORT = 8081; // Changed from 8080 to avoid Apache conflict
+// ============================================================================
+// CONFIGURATION
+// ============================================================================
 
-// Serve static files from public directory
+const HTTP_PORT = 3001;
+const WS_PORT = 8081;
+
+// ============================================================================
+// EXPRESS SERVER SETUP
+// ============================================================================
+
+const app = express();
 app.use(express.static(path.join(__dirname, "public")));
 
-// Start HTTP server
-app.listen(PORT, () => {
-  console.log(`HTTP Server running on http://localhost:${PORT}`);
+app.listen(HTTP_PORT, () => {
+  console.log(`[HTTP] Server running on http://localhost:${HTTP_PORT}`);
 });
 
-// Create WebSocket server
+// ============================================================================
+// WEBSOCKET SERVER SETUP
+// ============================================================================
+
 const wss = new WebSocket.Server({ port: WS_PORT });
 
-// Store connected clients by type
+console.log(`[WS] Server running on ws://localhost:${WS_PORT}`);
+
+// ============================================================================
+// CLIENT REGISTRY
+// ============================================================================
+
 const clients = {
   hand: null,
   mech: null,
   site: [],
-  admin: [],
+  admin: []
 };
 
-// Admin override state
-const adminOverride = {
-  flex: {
-    enabled: false,
-    flex_1_2: { min: 45, max: 55 },
-    flex_3_4: { min: 45, max: 55 },
-    flex_5: { min: 45, max: 55 },
-  },
-  biometric: {
-    enabled: false,
-    heart_rate: { min: 70, max: 80 },
-    spo2: { min: 97, max: 99 },
-  },
-  mech: {
-    enabled: false,
-    gas: { min: 3, max: 7 },
-    temperature: { min: 23, max: 25 },
-    ultrasonic: { min: 45, max: 55 },
-  },
-  thresholds: {
-    heart_rate: { min: 60, max: 100, critical_low: 40, critical_high: 150 },
-    spo2: { min: 95, max: 100, critical_low: 85, critical_high: 100 },
-    temperature: { min: 20, max: 48, critical_low: 15, critical_high: 35 },
-    gas: { min: 0, max: 30, critical_low: 0, critical_high: 50 },
-    ultrasonic: { min: 5, max: 10000, critical_low: 0, critical_high: 2000 },
-  },
-  autoEmergency: true,
-};
+// ============================================================================
+// STATE MANAGEMENT
+// ============================================================================
 
-// Helper function to get random value in range
-function getRandomInRange(min, max, decimals = 1) {
-  const value = min + Math.random() * (max - min);
-  return decimals === 0 ? Math.round(value) : parseFloat(value.toFixed(decimals));
-}
-
-// Store latest data from each client
 const latestData = {
   hand: {
     flex: null,
+    biometric: null,
     emergency: false,
-    max30102: null,
-    timestamp: null,
+    timestamp: null
   },
   mech: {
     servos: null,
@@ -77,1104 +82,1032 @@ const latestData = {
     temperature: null,
     ultrasonic: null,
     exhaustFan: null,
-    timestamp: null,
-  },
-};
-
-// ============================================================================
-// ML PREDICTION SYSTEM
-// ============================================================================
-
-const mlData = {
-  heart_rate: {
-    history: [],
-    prediction: null,
-    confidence: 0,
-    lastUpdate: null,
-    trend: 0,
-  },
-  spo2: {
-    history: [],
-    prediction: null,
-    confidence: 0,
-    lastUpdate: null,
-    trend: 0,
-  },
-  temperature: {
-    history: [],
-    prediction: null,
-    confidence: 0,
-    lastUpdate: null,
-    trend: 0,
-  },
-  gas: {
-    history: [],
-    prediction: null,
-    confidence: 0,
-    lastUpdate: null,
-    trend: 0,
-  },
-  ultrasonic: {
-    history: [],
-    prediction: null,
-    confidence: 0,
-    lastUpdate: null,
-    trend: 0,
-  },
-};
-
-const ML_HISTORY_SIZE = 30;
-const PREDICTION_THRESHOLD = 3000; // 3 seconds
-
-function addToHistory(sensor, value) {
-  if (value === null || value === undefined || isNaN(value)) return;
-
-  const sensorData = mlData[sensor];
-  if (!sensorData) return;
-
-  sensorData.history.push({
-    value: value,
-    timestamp: Date.now(),
-  });
-
-  // Keep only last N readings
-  if (sensorData.history.length > ML_HISTORY_SIZE) {
-    sensorData.history.shift();
+    timestamp: null
   }
-
-  sensorData.lastUpdate = Date.now();
-}
-
-function calculateTrend(sensor) {
-  const sensorData = mlData[sensor];
-  if (!sensorData || sensorData.history.length < 5) return 0;
-
-  // Calculate linear trend using last 10 readings
-  const recent = sensorData.history.slice(-10);
-  let sumX = 0,
-    sumY = 0,
-    sumXY = 0,
-    sumX2 = 0;
-
-  for (let i = 0; i < recent.length; i++) {
-    sumX += i;
-    sumY += recent[i].value;
-    sumXY += i * recent[i].value;
-    sumX2 += i * i;
-  }
-
-  const n = recent.length;
-  const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
-
-  return slope;
-}
-
-function calculateStdDev(values) {
-  if (values.length === 0) return 0;
-  const mean = values.reduce((sum, v) => sum + v, 0) / values.length;
-  const squaredDiffs = values.map((v) => Math.pow(v - mean, 2));
-  const variance =
-    squaredDiffs.reduce((sum, v) => sum + v, 0) / values.length;
-  return Math.sqrt(variance);
-}
-
-function calculateConfidence(sensor) {
-  const sensorData = mlData[sensor];
-  if (!sensorData || sensorData.history.length < 5) return 0;
-
-  // Calculate standard deviation of recent readings
-  const recent = sensorData.history.slice(-10).map((h) => h.value);
-  const stdDev = calculateStdDev(recent);
-
-  // Map std dev to confidence range (0-5)
-  // Lower std dev = higher confidence (lower ±range)
-  let confidence;
-  if (stdDev < 1) confidence = 1;
-  else if (stdDev < 2) confidence = 2;
-  else if (stdDev < 3) confidence = 3;
-  else if (stdDev < 5) confidence = 4;
-  else confidence = 5;
-
-  return confidence;
-}
-
-function calculatePrediction(sensor) {
-  const sensorData = mlData[sensor];
-  if (!sensorData || sensorData.history.length < 3) {
-    return null;
-  }
-
-  // Use exponential weighted moving average + trend
-  const recent = sensorData.history.slice(-10);
-  let ewma = recent[0].value;
-  const alpha = 0.3; // Smoothing factor
-
-  for (let i = 1; i < recent.length; i++) {
-    ewma = alpha * recent[i].value + (1 - alpha) * ewma;
-  }
-
-  // Add trend component
-  const trend = calculateTrend(sensor);
-  const prediction = ewma + trend * 3; // Project 3 time steps ahead
-
-  // Calculate confidence
-  const confidence = calculateConfidence(sensor);
-
-  sensorData.prediction = Math.round(prediction * 10) / 10;
-  sensorData.confidence = confidence;
-  sensorData.trend = trend;
-
-  return {
-    value: sensorData.prediction,
-    confidence: confidence,
-    trend: trend > 0 ? "rising" : trend < 0 ? "falling" : "stable",
-  };
-}
-
-function getMLPredictions() {
-  const predictions = {};
-  const now = Date.now();
-
-  Object.keys(mlData).forEach((sensor) => {
-    const sensorData = mlData[sensor];
-
-    // Only predict if data is stale
-    if (
-      sensorData.lastUpdate &&
-      now - sensorData.lastUpdate > PREDICTION_THRESHOLD
-    ) {
-      const pred = calculatePrediction(sensor);
-      if (pred) {
-        predictions[sensor] = pred;
-      }
-    }
-  });
-
-  return predictions;
-}
-
-// ============================================================================
-// EMERGENCY DETECTION SYSTEM
-// ============================================================================
-
-const vitalRanges = {
-  heart_rate: { min: 60, max: 150, critical_low: 40, critical_high: 150 },
-  spo2: { min: 85, max: 100, critical_low: 85, critical_high: 100 },
-  temperature: { min: 20, max: 48, critical_low: 15, critical_high: 35 },
-  gas: { min: 0, max: 30, critical_low: 0, critical_high: 50 },
-  ultrasonic: { min: 5, max: 10000, critical_low: 0, critical_high: 2000 },
 };
 
 const emergencyState = {
   active: false,
-  level: "normal", // 'normal', 'warning', 'critical', 'emergency'
-  triggeredBy: [],
-  timestamp: null,
+  level: "normal", // normal, warning, critical, emergency
   autoTriggered: false,
   manualTriggered: false,
-  lastEmergencyTime: 0,
-  cooldownPeriod: 30000, // 30 seconds
+  triggeredBy: [],
+  reason: null,
+  timestamp: null,
+  cooldownUntil: 0
 };
 
 // Track vital level separately from emergency state
 let previousVitalLevel = "normal";
 
-const previousValues = {
-  heart_rate: { value: null, timestamp: null },
-  spo2: { value: null, timestamp: null },
+const adminOverride = {
+  flex: {
+    enabled: false,
+    forwardToServos: false,
+    flex_1_2: { enabled: false, min: 45, max: 55 },
+    flex_3_4: { enabled: false, min: 45, max: 55 },
+    flex_5: { enabled: false, min: 45, max: 55 }
+  },
+  biometric: {
+    enabled: false,
+    heart_rate: { min: 70, max: 80 },
+    spo2: { min: 97, max: 99 }
+  },
+  mech: {
+    enabled: false,
+    gas: { min: 3, max: 7 },
+    temperature: { min: 23, max: 25 },
+    ultrasonic: { min: 45, max: 55 }
+  },
+  thresholds: {
+    heart_rate: { min: 60, max: 100, critical_low: 40, critical_high: 150 },
+    spo2: { min: 95, max: 100, critical_low: 85, critical_high: 100 },
+    temperature: { min: 20, max: 50, critical_low: 15, critical_high: 55 },
+    gas: { min: 0, max: 30, critical_low: 0, critical_high: 50 },
+    ultrasonic: { min: 5, max: 10000, critical_low: 0, critical_high: 2000 }
+  },
+  autoEmergency: true
 };
 
-function checkVitals(sensorData) {
-  const abnormal = {
-    warning: [],
-    critical: [],
-    emergency: [],
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+function getRandomInRange(min, max, decimals = 1) {
+  const value = min + Math.random() * (max - min);
+  return decimals === 0 ? Math.round(value) : parseFloat(value.toFixed(decimals));
+}
+
+function asNumber(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function normalizeTemperatureThresholds(tempConfig = {}) {
+  const defaults = { min: 20, max: 50, critical_low: 15, critical_high: 55 };
+  const merged = {
+    critical_low: asNumber(tempConfig.critical_low, defaults.critical_low),
+    min: asNumber(tempConfig.min, defaults.min),
+    max: asNumber(tempConfig.max, defaults.max),
+    critical_high: asNumber(tempConfig.critical_high, defaults.critical_high)
   };
 
-  // Check each sensor against ranges (use admin thresholds if available)
-  Object.keys(vitalRanges).forEach((sensor) => {
-    // Skip heart_rate and spo2 - don't check them for emergencies
-    if (sensor === "heart_rate" || sensor === "spo2") {
-      return;
-    }
-    
-    let value = null;
+  merged.max = Math.min(50, Math.max(merged.max, merged.min));
+  merged.critical_high = Math.max(merged.critical_high, merged.max + 0.5);
+  merged.critical_high = Math.min(55, merged.critical_high);
 
-    // Extract sensor value from data
-    if (sensor === "temperature" && sensorData.mech?.temperature) {
-      value = sensorData.mech.temperature;
-    } else if (sensor === "gas" && sensorData.mech?.gas?.percent) {
-      value = sensorData.mech.gas.percent;
-    } else if (sensor === "ultrasonic" && sensorData.mech?.ultrasonic) {
-      value = sensorData.mech.ultrasonic;
-    }
-
-    if (value === null || value === 0) return;
-
-    // Use admin thresholds if available, otherwise use default vitalRanges
-    const ranges = adminOverride.thresholds[sensor] || vitalRanges[sensor];
-
-    // Check for critical violations
-    if (value < ranges.critical_low || value > ranges.critical_high) {
-      abnormal.emergency.push({ sensor, value, range: "critical" });
-    }
-    // Check for normal range violations
-    else if (value < ranges.min || value > ranges.max) {
-      abnormal.warning.push({ sensor, value, range: "normal" });
-    }
-  });
-
-  // Determine overall status
-  let status = "normal";
-  if (abnormal.emergency.length > 0) {
-    status = "emergency";
-  } else if (abnormal.warning.length >= 3) {
-    status = "emergency"; // 3+ sensors abnormal = emergency
-  } else if (abnormal.warning.length >= 2) {
-    status = "critical";
-  } else if (abnormal.warning.length >= 1) {
-    status = "warning";
+  if (merged.critical_high <= merged.max) {
+    merged.max = Math.max(merged.critical_low + 1, merged.critical_high - 0.5);
   }
 
-  return { status, abnormal: [...abnormal.warning, ...abnormal.emergency] };
+  if (merged.min <= merged.critical_low) {
+    merged.min = merged.critical_low + 0.5;
+  }
+
+  return merged;
 }
 
-function detectRapidChanges(sensor, newValue, oldData) {
-  if (!oldData || oldData.value === null || newValue === null) return null;
-
-  // Skip heart_rate and spo2 - don't check for rapid changes
-  if (sensor === "heart_rate" || sensor === "spo2") {
-    return null;
+function getSensorUnit(sensor) {
+  switch (sensor) {
+    case "temperature":
+      return "°C";
+    case "gas":
+      return "%";
+    case "ultrasonic":
+      return "cm";
+    default:
+      return "";
   }
-
-  const timeDiff = (Date.now() - oldData.timestamp) / 1000; // seconds
-  if (timeDiff > 10) return null; // Too much time passed
-
-  const valueDiff = Math.abs(newValue - oldData.value);
-
-  // Temperature: >10°C in <5 seconds
-  if (sensor === "temperature" && valueDiff > 10 && timeDiff < 5) {
-    return {
-      sensor,
-      change: valueDiff,
-      time: timeDiff,
-      reason: `Temperature changed ${valueDiff}°C in ${timeDiff.toFixed(1)}s`,
-    };
-  }
-
-  // Gas: >20% in <5 seconds
-  if (sensor === "gas" && valueDiff > 20 && timeDiff < 5) {
-    return {
-      sensor,
-      change: valueDiff,
-      time: timeDiff,
-      reason: `Gas changed ${valueDiff}% in ${timeDiff.toFixed(1)}s`,
-    };
-  }
-
-  return null;
 }
 
-function triggerEmergency(reason, sensorData, abnormal) {
+function createAbnormalReading(sensor, value, level, status, threshold) {
+  const unit = getSensorUnit(sensor);
+  return {
+    sensor,
+    value,
+    level,
+    status,
+    threshold,
+    unit,
+    deviation: parseFloat(Math.abs(value - threshold).toFixed(1)),
+    message: `${sensor} is ${status.replace(/_/g, " ")}: ${value}${unit} (limit ${threshold}${unit})`
+  };
+}
+
+function buildEmergencyReason(reason, abnormal) {
+  const detailed = abnormal.map(item => ({
+    sensor: item.sensor,
+    level: item.level,
+    status: item.status,
+    value: item.value,
+    threshold: item.threshold,
+    deviation: item.deviation,
+    unit: item.unit,
+    message: item.message
+  }));
+
+  const detailText = detailed.length > 0
+    ? detailed
+      .map(d => `${d.sensor.toUpperCase()}: ${d.value}${d.unit} (${d.status.replace(/_/g, " ")}, threshold ${d.threshold}${d.unit}, deviation ${d.deviation}${d.unit}, ${d.level})`)
+      .join(" | ")
+    : "No abnormal readings";
+
+  return {
+    summary: reason,
+    detailText,
+    abnormalReadings: detailed
+  };
+}
+
+function createMessage(type, source, target, payload) {
+  return {
+    type,
+    source,
+    target,
+    payload,
+    timestamp: Date.now()
+  };
+}
+
+function sendToClient(client, message) {
+  if (client && client.readyState === WebSocket.OPEN) {
+    client.send(JSON.stringify(message));
+    return true;
+  }
+  return false;
+}
+
+function broadcastToSites(message) {
+  clients.site.forEach(client => sendToClient(client, message));
+}
+
+function broadcastToAdmins(message) {
+  clients.admin.forEach(client => sendToClient(client, message));
+}
+
+function broadcastToAll(message) {
+  sendToClient(clients.hand, message);
+  sendToClient(clients.mech, message);
+  broadcastToSites(message);
+  broadcastToAdmins(message);
+}
+
+// ============================================================================
+// FLEX TO SERVO CONVERSION
+// ============================================================================
+
+function flexPercentToServoAngle(percent) {
+  // Convert flex percentage (0-100) to servo angle (0-180)
+  return Math.round((percent / 100) * 180);
+}
+
+function getServoAnglesFromFlex(flexData) {
+  const servos = {};
+  
+  if (flexData.flex_1 !== undefined) {
+    servos.servo_1 = flexPercentToServoAngle(flexData.flex_1);
+  }
+  
+  if (flexData.flex_2 !== undefined) {
+    servos.servo_2 = flexPercentToServoAngle(flexData.flex_2);
+  }
+  
+  if (flexData.flex_3 !== undefined) {
+    servos.servo_3 = flexPercentToServoAngle(flexData.flex_3);
+  }
+  
+  if (flexData.flex_4 !== undefined) {
+    servos.servo_4 = flexPercentToServoAngle(flexData.flex_4);
+  }
+  
+  if (flexData.flex_5 !== undefined) {
+    servos.servo_5 = flexPercentToServoAngle(flexData.flex_5);
+  }
+  
+  return servos;
+}
+
+// ============================================================================
+// OVERRIDE ENGINE
+// ============================================================================
+
+function applyFlexOverride(realFlexData) {
+  if (!adminOverride.flex.enabled) {
+    return realFlexData;
+  }
+  
+  const overridden = { ...realFlexData };
+  
+  if (adminOverride.flex.flex_1_2?.enabled) {
+    overridden.flex_1_2 = getRandomInRange(
+      adminOverride.flex.flex_1_2.min,
+      adminOverride.flex.flex_1_2.max
+    );
+  }
+  
+  if (adminOverride.flex.flex_3_4?.enabled) {
+    overridden.flex_3_4 = getRandomInRange(
+      adminOverride.flex.flex_3_4.min,
+      adminOverride.flex.flex_3_4.max
+    );
+  }
+  
+  if (adminOverride.flex.flex_5?.enabled) {
+    overridden.flex_5 = getRandomInRange(
+      adminOverride.flex.flex_5.min,
+      adminOverride.flex.flex_5.max
+    );
+  }
+  
+  return overridden;
+}
+
+function applyBiometricOverride(realBiometric) {
+  if (!adminOverride.biometric.enabled || !realBiometric) {
+    return realBiometric;
+  }
+  
+  return {
+    ...realBiometric,
+    heart_rate: getRandomInRange(
+      adminOverride.biometric.heart_rate.min,
+      adminOverride.biometric.heart_rate.max,
+      0
+    ),
+    spo2: getRandomInRange(
+      adminOverride.biometric.spo2.min,
+      adminOverride.biometric.spo2.max,
+      0
+    )
+  };
+}
+
+function applyMechOverride(realMech) {
+  if (!adminOverride.mech.enabled) {
+    return realMech;
+  }
+  
+  const overridden = { ...realMech };
+  
+  if (realMech.gas) {
+    const gasValue = getRandomInRange(adminOverride.mech.gas.min, adminOverride.mech.gas.max, 1);
+    overridden.gas = {
+      percent: gasValue,
+      alert: gasValue > adminOverride.thresholds.gas.max
+    };
+  }
+  
+  overridden.temperature = getRandomInRange(
+    adminOverride.mech.temperature.min,
+    adminOverride.mech.temperature.max,
+    1
+  );
+  
+  overridden.ultrasonic = getRandomInRange(
+    adminOverride.mech.ultrasonic.min,
+    adminOverride.mech.ultrasonic.max,
+    0
+  );
+  
+  return overridden;
+}
+
+// ============================================================================
+// EMERGENCY ENGINE
+// ============================================================================
+
+function checkVitals() {
+  const abnormal = [];
+  const thresholds = adminOverride.thresholds;
+  
+  // Check mech sensors only (not biometric per original design)
+  if (latestData.mech.temperature !== null) {
+    const temp = latestData.mech.temperature;
+    if (temp < thresholds.temperature.critical_low || temp > thresholds.temperature.critical_high) {
+      abnormal.push(
+        createAbnormalReading(
+          "temperature",
+          temp,
+          "critical",
+          temp > thresholds.temperature.critical_high ? "above_critical_high" : "below_critical_low",
+          temp > thresholds.temperature.critical_high ? thresholds.temperature.critical_high : thresholds.temperature.critical_low
+        )
+      );
+    } else if (temp < thresholds.temperature.min || temp > thresholds.temperature.max) {
+      abnormal.push(
+        createAbnormalReading(
+          "temperature",
+          temp,
+          "warning",
+          temp > thresholds.temperature.max ? "above_warning_max" : "below_warning_min",
+          temp > thresholds.temperature.max ? thresholds.temperature.max : thresholds.temperature.min
+        )
+      );
+    }
+  }
+  
+  if (latestData.mech.gas?.percent !== undefined) {
+    const gas = latestData.mech.gas.percent;
+    if (gas > thresholds.gas.critical_high) {
+      abnormal.push(createAbnormalReading("gas", gas, "critical", "above_critical_high", thresholds.gas.critical_high));
+    } else if (gas > thresholds.gas.max) {
+      abnormal.push(createAbnormalReading("gas", gas, "warning", "above_warning_max", thresholds.gas.max));
+    }
+  }
+  
+  if (latestData.mech.ultrasonic !== null) {
+    const dist = latestData.mech.ultrasonic;
+    if (dist < thresholds.ultrasonic.critical_low) {
+      abnormal.push(createAbnormalReading("ultrasonic", dist, "critical", "below_critical_low", thresholds.ultrasonic.critical_low));
+    } else if (dist < thresholds.ultrasonic.min) {
+      abnormal.push(createAbnormalReading("ultrasonic", dist, "warning", "below_warning_min", thresholds.ultrasonic.min));
+    }
+  }
+  
+  // Determine overall level
+  const criticalCount = abnormal.filter(a => a.level === "critical").length;
+  const warningCount = abnormal.filter(a => a.level === "warning").length;
+  
+  let level = "normal";
+  if (criticalCount > 0) {
+    level = "emergency";
+  } else if (warningCount >= 3) {
+    level = "emergency";
+  } else if (warningCount >= 2) {
+    level = "critical";
+  } else if (warningCount >= 1) {
+    level = "warning";
+  }
+  
+  return { level, abnormal };
+}
+
+function triggerAutoEmergency(reason, abnormal) {
   const now = Date.now();
-
-  // Cooldown check
-  if (now - emergencyState.lastEmergencyTime < emergencyState.cooldownPeriod) {
+  
+  // Cooldown check (30 seconds)
+  if (now < emergencyState.cooldownUntil) {
     return;
   }
-
+  
   emergencyState.active = true;
   emergencyState.level = "emergency";
-  emergencyState.triggeredBy = abnormal;
-  emergencyState.timestamp = now;
   emergencyState.autoTriggered = true;
-  emergencyState.lastEmergencyTime = now;
+  emergencyState.manualTriggered = false;
+  emergencyState.triggeredBy = abnormal;
+  emergencyState.reason = buildEmergencyReason(reason, abnormal);
+  emergencyState.timestamp = now;
+  emergencyState.cooldownUntil = now + 30000;
+  
+  console.log("\n" + "=".repeat(60));
+  console.log("🚨 AUTO-EMERGENCY TRIGGERED");
+  console.log(`Reason: ${emergencyState.reason.summary}`);
+  console.log(`Details: ${emergencyState.reason.detailText}`);
+  console.log("=".repeat(60) + "\n");
+  
+  // Notify mech to lock servos
+  sendToClient(clients.mech, createMessage(
+    "emergency.alert",
+    "server",
+    "mech",
+    {
+      active: true,
+      reason: emergencyState.reason
+    }
+  ));
+  
+  // Broadcast to all
+  broadcastEmergencyStatus();
+}
 
-  console.log("\n" + "=".repeat(70));
-  console.log("🚨 EMERGENCY AUTO-TRIGGERED 🚨");
-  console.log("Reason:", reason);
-  console.log(
-    "Abnormal sensors:",
-    abnormal.map((a) => `${a.sensor}: ${a.value}`).join(", ")
+function clearEmergency() {
+  emergencyState.active = false;
+  emergencyState.level = "normal";
+  emergencyState.autoTriggered = false;
+  emergencyState.manualTriggered = false;
+  emergencyState.triggeredBy = [];
+  emergencyState.reason = null;
+  emergencyState.timestamp = Date.now();
+  
+  console.log("[EMERGENCY] Cleared");
+  
+  // Notify mech to unlock
+  sendToClient(clients.mech, createMessage(
+    "emergency.alert",
+    "server",
+    "mech",
+    { active: false, reason: null }
+  ));
+  
+  broadcastEmergencyStatus();
+}
+
+function broadcastEmergencyStatus() {
+  const message = createMessage(
+    "emergency.status",
+    "server",
+    "broadcast",
+    {
+      active: emergencyState.active,
+      level: emergencyState.level,
+      autoTriggered: emergencyState.autoTriggered,
+      manualTriggered: emergencyState.manualTriggered,
+      triggeredBy: emergencyState.triggeredBy,
+      reason: emergencyState.reason
+    }
   );
-  console.log("=".repeat(70) + "\n");
-
-  // Send emergency to hand
-  if (clients.hand && clients.hand.readyState === WebSocket.OPEN) {
-    clients.hand.send(
-      JSON.stringify({
-        type: "emergency_auto",
-        active: true,
-        reason: reason,
-        sensors: abnormal.map((a) => a.sensor),
-        timestamp: now,
-      })
-    );
-    console.log("[EMERGENCY] Command sent to hand");
-  }
-
-  // Send emergency to mech
-  if (clients.mech && clients.mech.readyState === WebSocket.OPEN) {
-    clients.mech.send(
-      JSON.stringify({
-        type: "emergency_alert",
-        active: true,
-      })
-    );
-  }
-
-  // Broadcast to all website clients
-  clients.site.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(
-        JSON.stringify({
-          type: "emergency_auto",
-          active: true,
-          reason: reason,
-          abnormal: abnormal,
-          timestamp: now,
-        })
-      );
-    }
-  });
+  
+  broadcastToAll(message);
 }
 
-function checkAllSensors() {
-  const sensorData = {
-    hand: latestData.hand,
-    mech: latestData.mech,
-  };
+// ============================================================================
+// MESSAGE HANDLERS
+// ============================================================================
 
-  // Check vital signs
-  const vitalCheck = checkVitals(sensorData);
-
-  // Check rapid changes
-  let rapidChange = null;
-  if (latestData.hand?.max30102?.heart_rate) {
-    rapidChange = detectRapidChanges(
-      "heart_rate",
-      latestData.hand.max30102.heart_rate,
-      previousValues.heart_rate
-    );
-    previousValues.heart_rate = {
-      value: latestData.hand.max30102.heart_rate,
-      timestamp: Date.now(),
-    };
-  }
-
-  if (!rapidChange && latestData.hand?.max30102?.spo2) {
-    rapidChange = detectRapidChanges(
-      "spo2",
-      latestData.hand.max30102.spo2,
-      previousValues.spo2
-    );
-    previousValues.spo2 = {
-      value: latestData.hand.max30102.spo2,
-      timestamp: Date.now(),
-    };
-  }
-
-  // Update emergency state
-  const prevLevel = emergencyState.level;
-  emergencyState.level = vitalCheck.status;
-
-  // Log status changes
-  if (emergencyState.level !== prevLevel) {
-    if (emergencyState.level === "normal") {
-      console.log("[VITALS] Status: NORMAL ✓");
-    } else if (emergencyState.level === "warning") {
-      console.log(
-        `[VITALS] WARNING: ${vitalCheck.abnormal
-          .map((a) => `${a.sensor}: ${a.value}`)
-          .join(", ")}`
-      );
-    } else if (emergencyState.level === "critical") {
-      console.log(
-        `[VITALS] CRITICAL: Multiple abnormal - ${vitalCheck.abnormal
-          .map((a) => `${a.sensor}: ${a.value}`)
-          .join(", ")}`
-      );
-    }
-  }
-
-  // Trigger emergency if needed (check if auto-emergency is enabled)
-  if (adminOverride.autoEmergency) {
-    if (rapidChange) {
-      triggerEmergency(rapidChange.reason, sensorData, [
-        { sensor: rapidChange.sensor, value: rapidChange.change },
-      ]);
-    } else if (vitalCheck.status === "emergency" && !emergencyState.active) {
-      triggerEmergency(
-        "Critical vital signs detected",
-        sensorData,
-        vitalCheck.abnormal
-      );
-    }
-  } else {
-    // Auto-emergency disabled by admin
-    if (emergencyState.level === "emergency" && prevLevel !== "emergency") {
-      console.log("[VITALS] EMERGENCY conditions detected but auto-trigger disabled by admin");
-    }
-  }
-
-  // Broadcast vital status to website (including when it returns to normal)
-  if (clients.site.length > 0 && emergencyState.level !== previousVitalLevel) {
-    previousVitalLevel = emergencyState.level;
-    clients.site.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(
-          JSON.stringify({
-            type: "vital_alert",
-            level: emergencyState.level,
-            abnormal: vitalCheck.abnormal,
-            timestamp: Date.now(),
-          })
-        );
+function handleHandMessage(ws, data) {
+  const msgType = data.type;
+  const payload = data.payload || data;
+  
+  switch (msgType) {
+    case "hand.flex_data":
+    case "flex_data": {
+      // Store raw flex data
+      latestData.hand.flex = payload;
+      latestData.hand.timestamp = Date.now();
+      
+      console.log(`[HAND] Flex: 1-2=${payload.flex_1_2?.toFixed(1)}%, 3-4=${payload.flex_3_4?.toFixed(1)}%, 5=${payload.flex_5?.toFixed(1)}%`);
+      
+      // Apply override for display
+      const displayFlex = applyFlexOverride(payload);
+      
+      // Send to websites (as if from hand)
+      const flexMsg = createMessage("hand.flex_data", "hand", "site", displayFlex);
+      broadcastToSites(flexMsg);
+      
+      // Forward to servos if enabled
+      if (adminOverride.flex.forwardToServos) {
+        const servoAngles = getServoAnglesFromFlex(displayFlex);
+        const servoMsg = createMessage("server.control_servos", "server", "mech", {
+          servos: servoAngles,
+          source: "flex_forward"
+        });
+        sendToClient(clients.mech, servoMsg);
+        console.log(`  → Servo forward: ${JSON.stringify(servoAngles)}`);
       }
-    });
+      break;
+    }
+    
+    case "hand.biometric_data":
+    case "max30102_data": {
+      latestData.hand.biometric = payload;
+      latestData.hand.timestamp = Date.now();
+      
+      console.log(`[HAND] ❤️ HR: ${payload.heart_rate} BPM, SpO2: ${payload.spo2}%`);
+      
+      // Apply override for display
+      const displayBio = applyBiometricOverride(payload);
+      
+      const bioMsg = createMessage("hand.biometric_data", "hand", "site", displayBio);
+      broadcastToSites(bioMsg);
+      break;
+    }
+    
+    case "hand.emergency_manual":
+    case "emergency": {
+      const isActive = payload.active;
+      
+      emergencyState.active = isActive;
+      emergencyState.autoTriggered = false;
+      emergencyState.manualTriggered = isActive;
+      emergencyState.triggeredBy = [];
+      emergencyState.reason = isActive
+        ? {
+          summary: "Manual emergency triggered by hand controller",
+          detailText: "Operator activated emergency mode manually from hand controller.",
+          abnormalReadings: []
+        }
+        : null;
+      emergencyState.timestamp = Date.now();
+      
+      if (!isActive) {
+        clearEmergency();
+      } else {
+        console.log(`[HAND] 🚨 Manual emergency: ${isActive ? "ACTIVATED" : "CLEARED"}`);
+        broadcastEmergencyStatus();
+        
+        // Notify mech
+        sendToClient(clients.mech, createMessage(
+          "emergency.alert",
+          "server",
+          "mech",
+          { active: true, reason: emergencyState.reason }
+        ));
+      }
+      break;
+    }
+    
+    case "emergency_ack": {
+      if (emergencyState.active) {
+        clearEmergency();
+        console.log("[HAND] Emergency acknowledged");
+      }
+      break;
+    }
   }
 }
 
-console.log(`WebSocket Server running on ws://localhost:${WS_PORT}`);
-console.log("Waiting for connections...\n");
+function handleMechMessage(ws, data) {
+  const msgType = data.type;
+  const payload = data.payload || data;
+  
+  switch (msgType) {
+    case "mech.sensor_data":
+    case "sensor_data": {
+      latestData.mech.servos = payload.servos;
+      latestData.mech.gas = payload.gas;
+      latestData.mech.temperature = payload.temperature_c;
+      latestData.mech.ultrasonic = payload.distance_cm;
+      latestData.mech.exhaustFan = payload.exhaust_fan_active;
+      latestData.mech.timestamp = Date.now();
+      
+      console.log(`[MECH] Gas: ${payload.gas?.percent?.toFixed(1) || "N/A"}%, Temp: ${payload.temperature_c?.toFixed(1) || "N/A"}°C, Dist: ${payload.distance_cm?.toFixed(1) || "N/A"}cm`);
+      break;
+    }
+  }
+}
+
+function handleSiteMessage(ws, data) {
+  const msgType = data.type;
+  const payload = data.payload || data;
+  
+  switch (msgType) {
+    case "get_data": {
+      ws.send(JSON.stringify(createMessage(
+        "server.current_data",
+        "server",
+        "site",
+        {
+          hand: latestData.hand,
+          mech: latestData.mech
+        }
+      )));
+      break;
+    }
+    
+    case "site.control_servo":
+    case "control_servo": {
+      const override = data.emergencyOverride || false;
+      console.log(`[SITE] Servo: ${data.servo} → ${data.angle}°${override ? " [OVERRIDE]" : ""}`);
+      
+      sendToClient(clients.mech, createMessage(
+        "server.control_servo",
+        "server",
+        "mech",
+        {
+          servo: data.servo,
+          angle: data.angle,
+          emergencyOverride: override
+        }
+      ));
+      break;
+    }
+    
+    case "site.control_servos":
+    case "control_servos": {
+      const override = data.emergencyOverride || false;
+      console.log(`[SITE] Bulk servo: ${JSON.stringify(data.servos)}${override ? " [OVERRIDE]" : ""}`);
+      
+      sendToClient(clients.mech, createMessage(
+        "server.control_servos",
+        "server",
+        "mech",
+        {
+          servos: data.servos,
+          emergencyOverride: override
+        }
+      ));
+      break;
+    }
+
+    case "site.control_exhaust":
+    case "control_exhaust": {
+      const active = !!payload.active;
+      console.log(`[SITE] Exhaust fan: ${active ? "ON" : "OFF"}`);
+
+      sendToClient(clients.mech, createMessage(
+        "server.control_exhaust",
+        "server",
+        "mech",
+        { active }
+      ));
+      break;
+    }
+    
+    case "emergency_alert": {
+      const isActive = data.active;
+      emergencyState.active = isActive;
+      emergencyState.autoTriggered = false;
+      emergencyState.manualTriggered = isActive;
+      emergencyState.triggeredBy = [];
+      emergencyState.reason = isActive
+        ? {
+          summary: "Manual emergency triggered from site/admin",
+          detailText: "Emergency mode activated by a remote operator from site/admin control.",
+          abnormalReadings: []
+        }
+        : null;
+      emergencyState.timestamp = Date.now();
+      
+      console.log(`[SITE] 🚨 Emergency: ${isActive ? "TRIGGERED" : "CLEARED"}`);
+      
+      if (isActive) {
+        sendToClient(clients.mech, createMessage(
+          "emergency.alert",
+          "server",
+          "mech",
+          { active: true, reason: emergencyState.reason }
+        ));
+      }
+      
+      broadcastEmergencyStatus();
+      break;
+    }
+    
+    case "emergency_ack": {
+      if (emergencyState.active) {
+        clearEmergency();
+        console.log("[SITE] Emergency acknowledged");
+      }
+      break;
+    }
+  }
+}
+
+function handleAdminMessage(ws, data) {
+  const msgType = data.type;
+  
+  switch (msgType) {
+    case "admin.override_state":
+    case "admin_override": {
+      const newState = data.overrideState;
+      
+      // Update override state
+      if (newState.flex) adminOverride.flex = newState.flex;
+      if (newState.biometric) adminOverride.biometric = newState.biometric;
+      if (newState.mech) adminOverride.mech = newState.mech;
+      if (newState.thresholds) {
+        // Deep merge thresholds to preserve all fields
+        adminOverride.thresholds = {
+          heart_rate: {
+            ...adminOverride.thresholds.heart_rate,
+            ...(newState.thresholds.heart_rate || {})
+          },
+          spo2: {
+            ...adminOverride.thresholds.spo2,
+            ...(newState.thresholds.spo2 || {})
+          },
+          temperature: {
+            ...normalizeTemperatureThresholds({
+              ...adminOverride.thresholds.temperature,
+              ...(newState.thresholds.temperature || {})
+            })
+          },
+          gas: {
+            ...adminOverride.thresholds.gas,
+            ...(newState.thresholds.gas || {})
+          },
+          ultrasonic: {
+            ...adminOverride.thresholds.ultrasonic,
+            ...(newState.thresholds.ultrasonic || {})
+          }
+        };
+      }
+      if (newState.autoEmergency !== undefined) {
+        adminOverride.autoEmergency = newState.autoEmergency;
+      }
+      
+      console.log(`[ADMIN] Override updated - Flex: ${adminOverride.flex.enabled}, Bio: ${adminOverride.biometric.enabled}, Mech: ${adminOverride.mech.enabled}, ForwardServos: ${adminOverride.flex.forwardToServos}`);
+      
+      // Broadcast to other admins
+      clients.admin.forEach(client => {
+        if (client !== ws && client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify(createMessage(
+            "admin.override_state",
+            "server",
+            "admin",
+            { overrideState: adminOverride }
+          )));
+        }
+      });
+      break;
+    }
+    
+    case "emergency_alert": {
+      handleSiteMessage(ws, data); // Same handling as site
+      break;
+    }
+    
+    case "emergency_ack": {
+      handleSiteMessage(ws, data);
+      break;
+    }
+  }
+}
+
+// ============================================================================
+// WEBSOCKET CONNECTION HANDLER
+// ============================================================================
 
 wss.on("connection", (ws) => {
-  console.log("New connection established");
-
+  console.log("[WS] New connection");
+  
   let clientType = null;
-  let clientId = Math.random().toString(36).substr(2, 9);
-
-  // Send welcome message
-  ws.send(
-    JSON.stringify({
-      type: "welcome",
-      message: "Connected to Robot Control Server",
-      clientId: clientId,
-    })
-  );
-
+  const clientId = Math.random().toString(36).substr(2, 9);
+  
+  // Send welcome
+  ws.send(JSON.stringify(createMessage(
+    "server.welcome",
+    "server",
+    "client",
+    { message: "Connected to Robot Control Server", clientId }
+  )));
+  
   ws.on("message", (message) => {
     try {
       const data = JSON.parse(message);
-
-      // Handle client identification
+      
+      // Handle identification
       if (data.type === "identify") {
         clientType = data.client;
-
-        if (clientType === "hand") {
-          if (clients.hand) {
-            clients.hand.terminate();
-          }
-          clients.hand = ws;
-          console.log(`✓ Hand client connected (ID: ${clientId})`);
-        } else if (clientType === "mech") {
-          if (clients.mech) {
-            clients.mech.terminate();
-          }
-          clients.mech = ws;
-          console.log(`✓ Mech client connected (ID: ${clientId})`);
-        } else if (clientType === "site") {
-          clients.site.push(ws);
-          console.log(
-            `✓ Website client connected (ID: ${clientId}), Total: ${clients.site.length}`
-          );
-
-          // Send current data to new website client
-          ws.send(
-            JSON.stringify({
-              type: "initial_data",
-              hand: latestData.hand,
-              mech: latestData.mech,
-            })
-          );
-        } else if (clientType === "admin") {
-          clients.admin.push(ws);
-          console.log(
-            `✓ Admin client connected (ID: ${clientId}), Total: ${clients.admin.length}`
-          );
-
-          // Send current override state to admin
-          ws.send(
-            JSON.stringify({
-              type: "override_state",
-              overrideState: adminOverride,
-            })
-          );
+        
+        switch (clientType) {
+          case "hand":
+            if (clients.hand) clients.hand.terminate();
+            clients.hand = ws;
+            console.log(`✓ Hand connected (${clientId})`);
+            break;
+            
+          case "mech":
+            if (clients.mech) clients.mech.terminate();
+            clients.mech = ws;
+            console.log(`✓ Mech connected (${clientId})`);
+            break;
+            
+          case "site":
+            clients.site.push(ws);
+            console.log(`✓ Site connected (${clientId}), total: ${clients.site.length}`);
+            
+            // Send initial data
+            ws.send(JSON.stringify(createMessage(
+              "server.initial_data",
+              "server",
+              "site",
+              {
+                hand: latestData.hand,
+                mech: latestData.mech,
+                emergencyState: {
+                  active: emergencyState.active,
+                  level: emergencyState.level,
+                  autoTriggered: emergencyState.autoTriggered,
+                  manualTriggered: emergencyState.manualTriggered,
+                  triggeredBy: emergencyState.triggeredBy,
+                  reason: emergencyState.reason
+                }
+              }
+            )));
+            break;
+            
+          case "admin":
+            clients.admin.push(ws);
+            console.log(`✓ Admin connected (${clientId}), total: ${clients.admin.length}`);
+            
+            // Send current override state
+            ws.send(JSON.stringify(createMessage(
+              "admin.override_state",
+              "server",
+              "admin",
+              { overrideState: adminOverride }
+            )));
+            break;
         }
-
-        ws.send(
-          JSON.stringify({
-            type: "identified",
-            client: clientType,
-            clientId: clientId,
-          })
-        );
-
+        
+        ws.send(JSON.stringify(createMessage(
+          "server.identified",
+          "server",
+          clientType,
+          { client: clientType, clientId }
+        )));
         return;
       }
-
-      // Handle admin override commands
-      if (clientType === "admin") {
-        if (data.type === "admin_override") {
-          adminOverride.flex = data.overrideState.flex;
-          adminOverride.biometric = data.overrideState.biometric;
-          adminOverride.mech = data.overrideState.mech;
-          
-          // Merge thresholds but enforce correct temperature max
-          if (data.overrideState.thresholds) {
-            adminOverride.thresholds = {
-              ...data.overrideState.thresholds,
-              temperature: {
-                min: 20,
-                max: 48,
-                critical_low: 15,
-                critical_high: 35
-              }
-            };
-          }
-          
-          adminOverride.autoEmergency = data.overrideState.autoEmergency;
-          
-          console.log(`[ADMIN] Override state updated`);
-          if (adminOverride.flex.enabled) console.log(`  Flex override active`);
-          if (adminOverride.biometric.enabled) console.log(`  Biometric override active`);
-          if (adminOverride.mech.enabled) console.log(`  Mech override active`);
-          
-          // Broadcast updated override state to all admins
-          clients.admin.forEach((client) => {
-            if (client.readyState === WebSocket.OPEN && client !== ws) {
-              client.send(
-                JSON.stringify({
-                  type: "override_state",
-                  overrideState: adminOverride,
-                })
-              );
-            }
-          });
-        }
+      
+      // Route messages based on client type
+      switch (clientType) {
+        case "hand":
+          handleHandMessage(ws, data);
+          break;
+        case "mech":
+          handleMechMessage(ws, data);
+          break;
+        case "site":
+          handleSiteMessage(ws, data);
+          break;
+        case "admin":
+          handleAdminMessage(ws, data);
+          break;
       }
-
-      // Handle data from hand
-      if (clientType === "hand") {
-        // REMOVED: control_servos handler - flex sensors should NOT control mech
-        // Flex data is for display only (handled by flex_data below)
-        
-        // Handle flex sensor data from hand
-        if (data.type === "flex_data") {
-          // Store in latestData
-          latestData.hand.flex = data.payload;
-          latestData.hand.timestamp = Date.now();
-          
-          console.log(`[HAND] Flex data: 1-2=${data.payload.flex_1_2.toFixed(1)}%, 3-4=${data.payload.flex_3_4.toFixed(1)}%, 5=${data.payload.flex_5.toFixed(1)}%`);
-          
-          // Apply admin override if enabled
-          let flexDataToSend = data.payload;
-          if (adminOverride.flex.enabled) {
-            flexDataToSend = {
-              flex_1_2: getRandomInRange(
-                adminOverride.flex.flex_1_2.min,
-                adminOverride.flex.flex_1_2.max
-              ),
-              flex_3_4: getRandomInRange(
-                adminOverride.flex.flex_3_4.min,
-                adminOverride.flex.flex_3_4.max
-              ),
-              flex_5: getRandomInRange(
-                adminOverride.flex.flex_5.min,
-                adminOverride.flex.flex_5.max
-              ),
-              timestamp: data.payload.timestamp,
-            };
-            console.log(`  [OVERRIDE] Flex: 1-2=${flexDataToSend.flex_1_2.toFixed(1)}%, 3-4=${flexDataToSend.flex_3_4.toFixed(1)}%, 5=${flexDataToSend.flex_5.toFixed(1)}%`);
-          }
-          
-          // Forward ONLY to website clients (NOT to mech)
-          if (clients.site && clients.site.length > 0) {
-            const flexMessage = JSON.stringify({
-              type: "flex_data",
-              payload: flexDataToSend,
-            });
-            clients.site.forEach((client) => {
-              if (client.readyState === WebSocket.OPEN) {
-                client.send(flexMessage);
-              }
-            });
-            console.log(`  → Forwarded to ${clients.site.length} website client(s)`);
-          }
-        }
-
-        if (data.type === "emergency") {
-          const payload = data.payload || data;
-          const isActive =
-            payload.active !== undefined ? payload.active : data.active;
-
-          // Update global emergency state
-          emergencyState.active = isActive;
-          emergencyState.manualTriggered = isActive;
-          emergencyState.timestamp = Date.now();
-          
-          if (!isActive) {
-            // Clear emergency
-            emergencyState.level = "normal";
-            emergencyState.autoTriggered = false;
-            emergencyState.triggeredBy = [];
-          }
-
-          latestData.hand.emergency = isActive;
-          latestData.hand.timestamp = Date.now();
-
-          console.log(
-            `[HAND] 🚨 MANUAL EMERGENCY: ${
-              isActive ? "ACTIVATED" : "DEACTIVATED"
-            }`
-          );
-
-          // Broadcast to all clients will happen in periodic update
-        }
-
-        if (data.type === "max30102_data") {
-          const payload = data.payload || data;
-          latestData.hand.max30102 = {
-            heart_rate: payload.heart_rate,
-            spo2: payload.spo2,
-            status: payload.status,
-            red: payload.red,
-            ir: payload.ir,
-          };
-          latestData.hand.timestamp = Date.now();
-
-          // Apply admin override if enabled
-          let biometricDataToSend = latestData.hand.max30102;
-          if (adminOverride.biometric.enabled) {
-            biometricDataToSend = {
-              heart_rate: getRandomInRange(
-                adminOverride.biometric.heart_rate.min,
-                adminOverride.biometric.heart_rate.max,
-                0
-              ),
-              spo2: getRandomInRange(
-                adminOverride.biometric.spo2.min,
-                adminOverride.biometric.spo2.max,
-                0
-              ),
-              status: "Normal",
-              red: payload.red,
-              ir: payload.ir,
-            };
-            console.log(`[ADMIN OVERRIDE] HR: ${biometricDataToSend.heart_rate}, SpO2: ${biometricDataToSend.spo2}`);
-          }
-
-          // Add to ML history (use actual data, not override)
-          addToHistory("heart_rate", payload.heart_rate);
-          addToHistory("spo2", payload.spo2);
-
-          console.log(
-            `[HAND] ❤️  HR: ${payload.heart_rate} BPM, SpO2: ${payload.spo2}%, Status: ${payload.status}`
-          );
-
-          // Broadcast to website clients (with override if enabled)
-          clients.site.forEach((client) => {
-            if (client.readyState === WebSocket.OPEN) {
-              client.send(
-                JSON.stringify({
-                  type: "max30102_data",
-                  data: biometricDataToSend,
-                  timestamp: latestData.hand.timestamp,
-                })
-              );
-            }
-          });
-        }
-
-        // Handle emergency trigger from website
-        if (data.type === "emergency_alert") {
-          const isActive = data.active;
-          
-          // Update global emergency state
-          emergencyState.active = isActive;
-          emergencyState.manualTriggered = isActive;
-          emergencyState.timestamp = Date.now();
-          
-          if (!isActive) {
-            // Clear emergency
-            emergencyState.level = "normal";
-            emergencyState.autoTriggered = false;
-            emergencyState.triggeredBy = [];
-          }
-          
-          console.log(
-            `[WEBSITE] 🚨 MANUAL EMERGENCY: ${
-              isActive ? "ACTIVATED" : "DEACTIVATED"
-            }`
-          );
-          
-          // Broadcast to all clients will happen in periodic update
-        }
-
-        // Handle emergency acknowledgment
-        if (data.type === "emergency_ack") {
-          if (emergencyState.autoTriggered || emergencyState.manualTriggered) {
-            emergencyState.active = false;
-            emergencyState.autoTriggered = false;
-            emergencyState.manualTriggered = false;
-            emergencyState.level = "normal";
-            emergencyState.triggeredBy = [];
-            console.log(
-              `[EMERGENCY] Acknowledged by user at ${new Date().toLocaleTimeString()}`
-            );
-
-            // Notify all clients
-            clients.site.forEach((client) => {
-              if (client.readyState === WebSocket.OPEN) {
-                client.send(
-                  JSON.stringify({
-                    type: "emergency_auto",
-                    active: false,
-                    timestamp: Date.now(),
-                  })
-                );
-              }
-            });
-          }
-        }
-      }
-
-      // Handle data from mech
-      if (clientType === "mech") {
-        if (data.type === "sensor_data") {
-          const payload = data.payload || data;
-          latestData.mech.servos = payload.servos;
-          latestData.mech.gas = payload.gas;
-          latestData.mech.temperature = payload.temperature_c;
-          latestData.mech.ultrasonic = payload.distance_cm;
-          latestData.mech.exhaustFan = payload.exhaust_fan_active;
-          latestData.mech.timestamp = Date.now();
-
-          // Apply admin override if enabled (only affects ML history with actual data)
-          if (payload.temperature_c) addToHistory("temperature", payload.temperature_c);
-          if (payload.gas?.percent) addToHistory("gas", payload.gas.percent);
-          if (payload.distance_cm) addToHistory("ultrasonic", payload.distance_cm);
-
-          console.log(
-            `[MECH] Gas: ${payload.gas ? payload.gas.percent + "%" : "N/A"}, ` +
-              `Temp: ${
-                payload.temperature_c ? payload.temperature_c + "°C" : "N/A"
-              }, ` +
-              `Distance: ${
-                payload.distance_cm ? payload.distance_cm + "cm" : "N/A"
-              }`
-          );
-          
-          if (adminOverride.mech.enabled) {
-            console.log(`[ADMIN OVERRIDE] Mech data will be overridden for website clients`);
-          }
-        }
-      }
-
-      // Handle requests from website
-      if (clientType === "site" && data.type === "get_data") {
-        ws.send(
-          JSON.stringify({
-            type: "current_data",
-            hand: latestData.hand,
-            mech: latestData.mech,
-          })
-        );
-      }
-
-      // Handle servo control from website
-      if (clientType === "site" && data.type === "control_servo") {
-        const overrideMsg = data.emergencyOverride ? " [OVERRIDE]" : "";
-        console.log(`[SITE] Servo control: ${data.servo} -> ${data.angle}°${overrideMsg}`);
-
-        // Forward to mech
-        if (clients.mech && clients.mech.readyState === WebSocket.OPEN) {
-          clients.mech.send(
-            JSON.stringify({
-              type: "control_servo",
-              servo: data.servo,
-              angle: data.angle,
-              emergencyOverride: data.emergencyOverride || false,
-            })
-          );
-        }
-      }
-
-      // Handle bulk servo control from website
-      if (clientType === "site" && data.type === "control_servos") {
-        const overrideMsg = data.emergencyOverride ? " [OVERRIDE]" : "";
-        console.log(
-          `[SITE] Bulk servo control: ${JSON.stringify(data.servos)}${overrideMsg}`
-        );
-
-        // Forward to mech
-        if (clients.mech && clients.mech.readyState === WebSocket.OPEN) {
-          clients.mech.send(
-            JSON.stringify({
-              type: "control_servos",
-              source: "website",
-              servos: data.servos,
-              emergencyOverride: data.emergencyOverride || false,
-            })
-          );
-        }
-      }
-
-      // Handle exhaust fan control from website
-      if (clientType === "site" && data.type === "control_exhaust") {
-        const active = !!data.active;
-        console.log(`[SITE] Exhaust fan: ${active ? "ON" : "OFF"}`);
-
-        // Forward to mech
-        if (clients.mech && clients.mech.readyState === WebSocket.OPEN) {
-          clients.mech.send(
-            JSON.stringify({
-              type: "control_exhaust",
-              active,
-              source: "website",
-            })
-          );
-        }
-      }
-
-      // Handle emergency acknowledgment from website
-      if (clientType === "site" && data.type === "emergency_ack") {
-        if (emergencyState.autoTriggered) {
-          emergencyState.active = false;
-          emergencyState.autoTriggered = false;
-          emergencyState.level = "normal";
-          emergencyState.triggeredBy = [];
-          console.log(
-            `[EMERGENCY] Acknowledged from website at ${new Date().toLocaleTimeString()}`
-          );
-
-          // Notify hand to stop blinking
-          if (clients.hand && clients.hand.readyState === WebSocket.OPEN) {
-            clients.hand.send(
-              JSON.stringify({
-                type: "emergency_auto",
-                active: false,
-                timestamp: Date.now(),
-              })
-            );
-          }
-
-          // Notify all website clients
-          clients.site.forEach((client) => {
-            if (client.readyState === WebSocket.OPEN) {
-              client.send(
-                JSON.stringify({
-                  type: "emergency_auto",
-                  active: false,
-                  timestamp: Date.now(),
-                })
-              );
-            }
-          });
-        }
-      }
+      
     } catch (error) {
-      console.error("Error processing message:", error);
+      console.error("[WS] Message error:", error.message);
     }
   });
-
+  
   ws.on("close", () => {
-    if (clientType === "hand") {
-      console.log(`✗ Hand client disconnected`);
-      clients.hand = null;
-    } else if (clientType === "mech") {
-      console.log(`✗ Mech client disconnected`);
-      clients.mech = null;
-    } else if (clientType === "site") {
-      const index = clients.site.indexOf(ws);
-      if (index > -1) {
-        clients.site.splice(index, 1);
-      }
-      console.log(
-        `✗ Website client disconnected, Remaining: ${clients.site.length}`
-      );
-    } else if (clientType === "admin") {
-      const index = clients.admin.indexOf(ws);
-      if (index > -1) {
-        clients.admin.splice(index, 1);
-      }
-      console.log(
-        `✗ Admin client disconnected, Remaining: ${clients.admin.length}`
-      );
+    switch (clientType) {
+      case "hand":
+        console.log("✗ Hand disconnected");
+        clients.hand = null;
+        break;
+      case "mech":
+        console.log("✗ Mech disconnected");
+        clients.mech = null;
+        break;
+      case "site":
+        const siteIdx = clients.site.indexOf(ws);
+        if (siteIdx > -1) clients.site.splice(siteIdx, 1);
+        console.log(`✗ Site disconnected, remaining: ${clients.site.length}`);
+        break;
+      case "admin":
+        const adminIdx = clients.admin.indexOf(ws);
+        if (adminIdx > -1) clients.admin.splice(adminIdx, 1);
+        console.log(`✗ Admin disconnected, remaining: ${clients.admin.length}`);
+        break;
     }
   });
-
+  
   ws.on("error", (error) => {
-    console.error("WebSocket error:", error);
+    console.error("[WS] Error:", error.message);
   });
 });
 
-// Broadcast emergency status to ALL clients every 1 second
+// ============================================================================
+// PERIODIC TASKS
+// ============================================================================
+
+// Broadcast emergency status every second
 setInterval(() => {
-  const emergencyBroadcast = {
-    type: "emergency_status",
-    active: emergencyState.active,
-    level: emergencyState.level,
-    manualTriggered: emergencyState.manualTriggered,
-    autoTriggered: emergencyState.autoTriggered,
-    triggeredBy: emergencyState.triggeredBy,
-    timestamp: emergencyState.timestamp || Date.now(),
-  };
-
-  // Send to hand controller
-  if (clients.hand && clients.hand.readyState === WebSocket.OPEN) {
-    clients.hand.send(JSON.stringify(emergencyBroadcast));
-  }
-
-  // Send to mech controller
-  if (clients.mech && clients.mech.readyState === WebSocket.OPEN) {
-    clients.mech.send(JSON.stringify(emergencyBroadcast));
-  }
-
-  // Send to website clients
-  clients.site.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify(emergencyBroadcast));
-    }
-  });
-
-  // Send to admin clients
-  clients.admin.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify(emergencyBroadcast));
-    }
-  });
+  broadcastEmergencyStatus();
 }, 1000);
 
-// Broadcast latest data to website clients every 3 seconds
+// Periodic update to sites every 3 seconds
 setInterval(() => {
-  if (clients.site.length > 0) {
-    const predictions = getMLPredictions();
-
-    // Apply admin overrides to data sent to website
-    let handData = { ...latestData.hand };
-    let mechData = { ...latestData.mech };
-
-    if (adminOverride.flex.enabled && handData.flex) {
-      handData.flex = {
-        flex_1_2: getRandomInRange(
-          adminOverride.flex.flex_1_2.min,
-          adminOverride.flex.flex_1_2.max
-        ),
-        flex_3_4: getRandomInRange(
-          adminOverride.flex.flex_3_4.min,
-          adminOverride.flex.flex_3_4.max
-        ),
-        flex_5: getRandomInRange(
-          adminOverride.flex.flex_5.min,
-          adminOverride.flex.flex_5.max
-        ),
-        timestamp: handData.flex.timestamp,
-      };
-    }
-
-    if (adminOverride.biometric.enabled && handData.max30102) {
-      handData.max30102 = {
-        heart_rate: getRandomInRange(
-          adminOverride.biometric.heart_rate.min,
-          adminOverride.biometric.heart_rate.max,
-          0
-        ),
-        spo2: getRandomInRange(
-          adminOverride.biometric.spo2.min,
-          adminOverride.biometric.spo2.max,
-          0
-        ),
-        status: "Normal",
-        red: handData.max30102.red,
-        ir: handData.max30102.ir,
-      };
-    }
-
-    if (adminOverride.mech.enabled) {
-      const gasValue = getRandomInRange(
-        adminOverride.mech.gas.min,
-        adminOverride.mech.gas.max,
-        1
-      );
-      if (mechData.gas) {
-        mechData.gas = {
-          percent: gasValue,
-          alert: gasValue > adminOverride.thresholds.gas.max,
-        };
-      }
-      mechData.temperature = getRandomInRange(
-        adminOverride.mech.temperature.min,
-        adminOverride.mech.temperature.max,
-        1
-      );
-      mechData.ultrasonic = getRandomInRange(
-        adminOverride.mech.ultrasonic.min,
-        adminOverride.mech.ultrasonic.max,
-        0
-      );
-    }
-
-    const message = JSON.stringify({
-      type: "periodic_update",
+  if (clients.site.length === 0) return;
+  
+  // Apply overrides
+  const handData = {
+    ...latestData.hand,
+    flex: latestData.hand.flex ? applyFlexOverride(latestData.hand.flex) : null,
+    biometric: applyBiometricOverride(latestData.hand.biometric)
+  };
+  
+  const mechData = applyMechOverride(latestData.mech);
+  
+  const message = createMessage(
+    "server.periodic_update",
+    "server",
+    "site",
+    {
       hand: handData,
       mech: mechData,
-      predictions: predictions,
       emergencyState: {
-        level: emergencyState.level,
         active: emergencyState.active,
+        level: emergencyState.level,
         autoTriggered: emergencyState.autoTriggered,
+        manualTriggered: emergencyState.manualTriggered,
         triggeredBy: emergencyState.triggeredBy,
-      },
-      timestamp: Date.now(),
-    });
-
-    clients.site.forEach((client) => {
-      if (client.readyState === WebSocket.OPEN) {
-        client.send(message);
+        reason: emergencyState.reason
       }
-    });
-
-    // Log ML predictions when active
-    if (Object.keys(predictions).length > 0) {
-      Object.entries(predictions).forEach(([sensor, pred]) => {
-        console.log(
-          `[ML] ${sensor}: ${pred.value} (±${pred.confidence}) [${pred.trend}]`
-        );
-      });
     }
-  }
+  );
+  
+  broadcastToSites(message);
 }, 3000);
 
-// Monitor vital signs every second
+// Monitor vitals every second
 setInterval(() => {
-  // Only check if we have recent data
   const now = Date.now();
-  const handRecent = latestData.hand.timestamp && (now - latestData.hand.timestamp < 15000);
   const mechRecent = latestData.mech.timestamp && (now - latestData.mech.timestamp < 15000);
-
-  if (handRecent || mechRecent) {
-    checkAllSensors();
+  
+  if (!mechRecent) return;
+  
+  const vitalCheck = checkVitals();
+  
+  // Update emergency level only if not in active emergency
+  if (!emergencyState.active) {
+    emergencyState.level = vitalCheck.level;
+  }
+  
+  // Trigger auto-emergency if enabled
+  if (adminOverride.autoEmergency && vitalCheck.level === "emergency" && !emergencyState.active) {
+    triggerAutoEmergency("Critical sensor readings detected", vitalCheck.abnormal);
+  }
+  
+  // Broadcast vital alert if vital level changed (independent of emergency state)
+  if (vitalCheck.level !== previousVitalLevel) {
+    previousVitalLevel = vitalCheck.level;
+    const alertMsg = createMessage(
+      "server.vital_alert",
+      "server",
+      "site",
+      {
+        level: vitalCheck.level,
+        abnormal: vitalCheck.abnormal
+      }
+    );
+    broadcastToSites(alertMsg);
   }
 }, 1000);
 
-// Status endpoint
+// Forward flex override to servos (interval-based when hand not sending)
+setInterval(() => {
+  if (!adminOverride.flex.enabled || !adminOverride.flex.forwardToServos) {
+    return;
+  }
+  
+  // Check if hand is sending (recent data)
+  const now = Date.now();
+  const handActive = latestData.hand.timestamp && (now - latestData.hand.timestamp < 500);
+  
+  // If hand is active, the flex_data handler already forwards
+  if (handActive) return;
+  
+  // Generate override values and forward
+  const overrideFlex = {
+    flex_1_2: adminOverride.flex.flex_1_2.enabled 
+      ? getRandomInRange(adminOverride.flex.flex_1_2.min, adminOverride.flex.flex_1_2.max)
+      : 50,
+    flex_3_4: adminOverride.flex.flex_3_4.enabled
+      ? getRandomInRange(adminOverride.flex.flex_3_4.min, adminOverride.flex.flex_3_4.max)
+      : 50,
+    flex_5: adminOverride.flex.flex_5.enabled
+      ? getRandomInRange(adminOverride.flex.flex_5.min, adminOverride.flex.flex_5.max)
+      : 50
+  };
+  
+  const servoAngles = getServoAnglesFromFlex(overrideFlex);
+  
+  sendToClient(clients.mech, createMessage(
+    "server.control_servos",
+    "server",
+    "mech",
+    {
+      servos: servoAngles,
+      source: "override_forward"
+    }
+  ));
+  
+  // Also send flex data to sites
+  broadcastToSites(createMessage("hand.flex_data", "hand", "site", overrideFlex));
+  
+}, 100);
+
+// ============================================================================
+// STATUS ENDPOINT
+// ============================================================================
+
 app.get("/status", (req, res) => {
   res.json({
-    server: "Robot Control Server",
+    server: "Robot Control Server (Refactored)",
+    version: "2.0.0",
     connections: {
       hand: clients.hand ? "connected" : "disconnected",
       mech: clients.mech ? "connected" : "disconnected",
       site: clients.site.length,
+      admin: clients.admin.length
     },
-    latestData: latestData,
+    latestData,
+    emergencyState: {
+      active: emergencyState.active,
+      level: emergencyState.level,
+      autoTriggered: emergencyState.autoTriggered,
+      manualTriggered: emergencyState.manualTriggered
+    },
+    overrides: {
+      flex: adminOverride.flex.enabled,
+      biometric: adminOverride.biometric.enabled,
+      mech: adminOverride.mech.enabled,
+      forwardToServos: adminOverride.flex.forwardToServos
+    }
   });
 });
 
-console.log("\n" + "=".repeat(70));
-console.log("  ROBOT CONTROL SERVER");
-console.log("=".repeat(70));
-console.log(`  HTTP Server:       http://localhost:${PORT}`);
-console.log(`  WebSocket Server:  ws://localhost:${WS_PORT}`);
-console.log(`  Status Endpoint:   http://localhost:${PORT}/status`);
-console.log("=".repeat(70) + "\n");
+// ============================================================================
+// STARTUP BANNER
+// ============================================================================
+
+console.log("\n" + "=".repeat(60));
+console.log("  ROBOT CONTROL SERVER (Refactored)");
+console.log("=".repeat(60));
+console.log(`  HTTP:   http://localhost:${HTTP_PORT}`);
+console.log(`  WS:     ws://localhost:${WS_PORT}`);
+console.log(`  Status: http://localhost:${HTTP_PORT}/status`);
+console.log("=".repeat(60) + "\n");
