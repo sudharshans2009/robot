@@ -1,1567 +1,1301 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Admin Panel - Robot Control System</title>
-    <style>
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-      }
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Panel - Robot Control</title>
+  <style>
+    :root {
+      --primary: #6366f1;
+      --primary-dark: #4f46e5;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --bg: #0f172a;
+      --card: #1e293b;
+      --text: #e2e8f0;
+      --text-muted: #94a3b8;
+      --border: #334155;
+    }
+    
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 1rem;
+    }
+    
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    
+    header {
+      background: var(--card);
+      padding: 1rem 1.5rem;
+      border-radius: 0.75rem;
+      margin-bottom: 1.5rem;
+      border: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+    
+    header h1 {
+      font-size: 1.5rem;
+      color: var(--warning);
+    }
+    
+    .header-actions {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+    }
+    
+    .status-item {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(255,255,255,0.05);
+      padding: 0.5rem 1rem;
+      border-radius: 0.375rem;
+    }
+    
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #475569;
+    }
+    
+    .status-dot.connected {
+      background: var(--success);
+      box-shadow: 0 0 8px var(--success);
+    }
+    
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+      gap: 1.5rem;
+    }
+    
+    .panel {
+      background: var(--card);
+      border-radius: 0.75rem;
+      border: 1px solid var(--border);
+      overflow: hidden;
+    }
+    
+    .panel-header {
+      padding: 1rem 1.25rem;
+      background: rgba(255,255,255,0.03);
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .panel-header h2 {
+      font-size: 1.125rem;
+      color: var(--primary);
+    }
+    
+    .panel-header .toggle {
+      color: var(--text-muted);
+      transition: transform 0.3s;
+    }
+    
+    .panel-header.collapsed .toggle {
+      transform: rotate(-90deg);
+    }
+    
+    .panel-content {
+      padding: 1.25rem;
+      transition: max-height 0.3s ease, opacity 0.3s ease;
+      overflow: hidden;
+    }
+    
+    .panel-content.collapsed {
+      max-height: 0 !important;
+      padding: 0 1.25rem;
+      opacity: 0;
+    }
+    
+    /* Form Controls */
+    .control-group {
+      margin-bottom: 1.25rem;
+    }
+    
+    .control-group:last-child {
+      margin-bottom: 0;
+    }
+    
+    label {
+      display: block;
+      margin-bottom: 0.5rem;
+      color: var(--text-muted);
+      font-size: 0.875rem;
+    }
+    
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.75rem;
+      background: rgba(99, 102, 241, 0.1);
+      border: 1px solid rgba(99, 102, 241, 0.2);
+      border-radius: 0.5rem;
+      margin-bottom: 1rem;
+    }
+    
+    .checkbox-row.warning-style {
+      background: rgba(245, 158, 11, 0.1);
+      border-color: rgba(245, 158, 11, 0.3);
+    }
+    
+    .checkbox-row input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+    }
+    
+    .checkbox-row label {
+      margin: 0;
+      color: var(--text);
+      cursor: pointer;
+    }
+    
+    .range-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+    
+    .range-input {
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .range-input small {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      margin-bottom: 0.25rem;
+    }
+    
+    input[type="number"] {
+      width: 100%;
+      padding: 0.625rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 0.375rem;
+      color: var(--text);
+      font-size: 0.9375rem;
+    }
+    
+    input[type="number"]:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+    
+    .value-display {
+      text-align: center;
+      padding: 0.625rem;
+      background: rgba(99, 102, 241, 0.15);
+      border-radius: 0.375rem;
+      color: var(--primary);
+      font-weight: 600;
+      font-size: 0.9375rem;
+    }
+    
+    /* Buttons */
+    button {
+      padding: 0.625rem 1rem;
+      background: var(--primary);
+      color: white;
+      border: none;
+      border-radius: 0.375rem;
+      cursor: pointer;
+      font-weight: 500;
+      font-size: 0.875rem;
+      transition: all 0.2s;
+    }
+    
+    button:hover {
+      background: var(--primary-dark);
+    }
+    
+    button.danger {
+      background: var(--danger);
+    }
+    
+    button.danger:hover {
+      background: #dc2626;
+    }
+    
+    button.success {
+      background: var(--success);
+    }
+    
+    button.success:hover {
+      background: #059669;
+    }
+    
+    button.warning {
+      background: var(--warning);
+    }
+    
+    button.warning:hover {
+      background: #d97706;
+    }
+    
+    .btn-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+    }
+    
+    .btn-group {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+    
+    /* Sensor Override Section */
+    .sensor-section {
+      padding: 1rem;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+      margin-bottom: 1rem;
+    }
+    
+    .sensor-section h4 {
+      font-size: 0.875rem;
+      color: var(--text);
+      margin-bottom: 0.75rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    
+    /* Threshold Grid */
+    .threshold-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.5rem;
+    }
+    
+    .threshold-grid small {
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.7rem;
+    }
+    
+    /* Activity Log */
+    .log-container {
+      max-height: 280px;
+      overflow-y: auto;
+      background: rgba(0,0,0,0.3);
+      border-radius: 0.375rem;
+      padding: 0.75rem;
+      font-family: 'Monaco', 'Consolas', monospace;
+      font-size: 0.8125rem;
+    }
+    
+    .log-entry {
+      padding: 0.375rem 0;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    
+    .log-entry:last-child {
+      border-bottom: none;
+    }
+    
+    .log-time {
+      color: var(--text-muted);
+      margin-right: 0.5rem;
+    }
+    
+    .log-msg {
+      color: var(--primary);
+    }
+    
+    .log-msg.danger {
+      color: var(--danger);
+    }
+    
+    .log-msg.success {
+      color: var(--success);
+    }
+    
+    .log-msg.warning {
+      color: var(--warning);
+    }
+    
+    /* Info Box */
+    .info-box {
+      padding: 0.75rem;
+      background: rgba(99, 102, 241, 0.1);
+      border-left: 3px solid var(--primary);
+      border-radius: 0.25rem;
+      margin-bottom: 1rem;
+      font-size: 0.875rem;
+      color: var(--text-muted);
+    }
+    
+    .danger-box {
+      padding: 0.75rem;
+      background: rgba(239, 68, 68, 0.1);
+      border-left: 3px solid var(--danger);
+      border-radius: 0.25rem;
+      margin-bottom: 1rem;
+      font-size: 0.875rem;
+    }
 
-      body {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-          "Helvetica Neue", Arial, sans-serif;
-        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-        color: #ecf0f1;
-        padding: 20px;
-        min-height: 100vh;
-      }
+    .reason-card {
+      margin-top: 1rem;
+      padding: 0.85rem;
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      border-radius: 0.5rem;
+      background: rgba(239, 68, 68, 0.08);
+    }
 
-      .container {
-        max-width: 1400px;
-        margin: 0 auto;
-      }
+    .reason-title {
+      font-weight: 700;
+      color: #fecaca;
+      margin-bottom: 0.4rem;
+      font-size: 0.9rem;
+    }
 
-      header {
-        background: rgba(255, 255, 255, 0.05);
-        padding: 20px;
-        border-radius: 10px;
-        margin-bottom: 30px;
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-      }
+    .reason-detail {
+      color: #fca5a5;
+      font-size: 0.82rem;
+      line-height: 1.35;
+      margin-bottom: 0.4rem;
+    }
 
-      h1 {
-        font-size: 2em;
-        margin-bottom: 10px;
-        color: #3498db;
-      }
+    .abnormal-list {
+      list-style: none;
+      display: grid;
+      gap: 0.35rem;
+    }
 
-      .status {
-        display: flex;
-        gap: 20px;
-        align-items: center;
-        flex-wrap: wrap;
-      }
-
-      .status-item {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 8px 16px;
-        background: rgba(255, 255, 255, 0.05);
-        border-radius: 5px;
-      }
-
-      .status-indicator {
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        background: #e74c3c;
-        animation: pulse 2s infinite;
-      }
-
-      .status-indicator.connected {
-        background: #2ecc71;
-      }
-
-      @keyframes pulse {
-        0%,
-        100% {
-          opacity: 1;
-        }
-        50% {
-          opacity: 0.5;
-        }
-      }
-
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-        gap: 20px;
-        margin-bottom: 20px;
-      }
-
-      .panel {
-        background: rgba(255, 255, 255, 0.05);
-        padding: 20px;
-        border-radius: 10px;
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-      }
-
-      .panel h2 {
-        color: #3498db;
-        margin-bottom: 15px;
-        font-size: 1.3em;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      }
-
-      .toggle-header {
-        cursor: pointer;
-        user-select: none;
-      }
-
-      .toggle-header::before {
-        content: "▼";
-        font-size: 0.8em;
-        transition: transform 0.3s;
-      }
-
-      .toggle-header.collapsed::before {
-        transform: rotate(-90deg);
-      }
-
-      .panel-content {
-        transition: max-height 0.3s ease-out, opacity 0.3s ease-out;
-        overflow: hidden;
-      }
-
-      .panel-content.collapsed {
-        max-height: 0 !important;
-        opacity: 0;
-      }
-
-      .control-group {
-        margin-bottom: 20px;
-      }
-
-      .control-group label {
-        display: block;
-        margin-bottom: 8px;
-        color: #bdc3c7;
-        font-weight: 500;
-      }
-
-      .input-group {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      }
-
-      input[type="number"],
-      input[type="range"],
-      select {
-        flex: 1;
-        padding: 10px;
-        background: rgba(255, 255, 255, 0.1);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        border-radius: 5px;
-        color: #ecf0f1;
-        font-size: 1em;
-      }
-
-      input[type="range"] {
-        padding: 0;
-        height: 8px;
-        cursor: pointer;
-      }
-
-      input[type="number"]:focus,
-      select:focus {
-        outline: none;
-        border-color: #3498db;
-        background: rgba(52, 152, 219, 0.1);
-      }
-
-      .value-display {
-        min-width: 80px;
-        padding: 10px;
-        background: rgba(52, 152, 219, 0.2);
-        border-radius: 5px;
-        text-align: center;
-        font-weight: bold;
-        color: #3498db;
-      }
-
-      button {
-        padding: 12px 24px;
-        background: #3498db;
-        color: white;
-        border: none;
-        border-radius: 5px;
-        cursor: pointer;
-        font-size: 1em;
-        font-weight: 600;
-        transition: all 0.3s;
-      }
-
-      button:hover {
-        background: #2980b9;
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(52, 152, 219, 0.4);
-      }
-
-      button:active {
-        transform: translateY(0);
-      }
-
-      button.danger {
-        background: #e74c3c;
-      }
-
-      button.danger:hover {
-        background: #c0392b;
-        box-shadow: 0 4px 12px rgba(231, 76, 60, 0.4);
-      }
-
-      button.success {
-        background: #2ecc71;
-      }
-
-      button.success:hover {
-        background: #27ae60;
-        box-shadow: 0 4px 12px rgba(46, 204, 113, 0.4);
-      }
-
-      button.warning {
-        background: #f39c12;
-      }
-
-      button.warning:hover {
-        background: #e67e22;
-        box-shadow: 0 4px 12px rgba(243, 156, 18, 0.4);
-      }
-
-      .button-group {
-        display: flex;
-        gap: 10px;
-        flex-wrap: wrap;
-      }
-
-      .checkbox-group {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 10px;
-        background: rgba(255, 255, 255, 0.05);
-        border-radius: 5px;
-      }
-
-      input[type="checkbox"] {
-        width: 20px;
-        height: 20px;
-        cursor: pointer;
-      }
-
-      .range-inputs {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 10px;
-      }
-
-      .info-box {
-        padding: 15px;
-        background: rgba(52, 152, 219, 0.1);
-        border-left: 4px solid #3498db;
-        border-radius: 5px;
-        margin-bottom: 15px;
-      }
-
-      .warning-box {
-        padding: 15px;
-        background: rgba(243, 156, 18, 0.1);
-        border-left: 4px solid #f39c12;
-        border-radius: 5px;
-        margin-bottom: 15px;
-      }
-
-      .danger-box {
-        padding: 15px;
-        background: rgba(231, 76, 60, 0.1);
-        border-left: 4px solid #e74c3c;
-        border-radius: 5px;
-        margin-bottom: 15px;
-      }
-
-      .preset-buttons {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-        gap: 10px;
-        margin-top: 15px;
-      }
-
-      .log-container {
-        max-height: 300px;
-        overflow-y: auto;
-        background: rgba(0, 0, 0, 0.3);
-        padding: 15px;
-        border-radius: 5px;
-        font-family: "Courier New", monospace;
-        font-size: 0.9em;
-      }
-
-      .log-entry {
-        padding: 5px 0;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-      }
-
-      .log-entry:last-child {
-        border-bottom: none;
-      }
-
-      .log-time {
-        color: #95a5a6;
-        margin-right: 10px;
-      }
-
-      .log-action {
-        color: #3498db;
-        font-weight: bold;
-      }
-
-      .log-value {
-        color: #2ecc71;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="container">
-      <header>
-        <h1>🔧 Admin Control Panel</h1>
-        <div class="status">
-          <div class="status-item">
-            <div class="status-indicator" id="connectionStatus"></div>
-            <span id="connectionText">Disconnected</span>
-          </div>
-          <div class="status-item">
-            <span>Override Active: <strong id="overrideStatus">No</strong></span>
-          </div>
-          <button onclick="window.open('/', '_blank')" class="success">
-            📊 Open Dashboard
-          </button>
-          <button onclick="resetAllOverrides()" class="warning">
-            🔄 Reset All
-          </button>
+    .abnormal-list li {
+      padding: 0.4rem 0.5rem;
+      border-radius: 0.35rem;
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 0.8rem;
+    }
+    
+    footer {
+      text-align: center;
+      padding: 2rem 0 1rem;
+      color: var(--text-muted);
+      font-size: 0.875rem;
+    }
+    
+    footer a {
+      color: var(--primary);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🔧 Admin Control Panel</h1>
+      <div class="header-actions">
+        <div class="status-item">
+          <div class="status-dot" id="wsStatus"></div>
+          <span id="wsStatusText">Connecting...</span>
         </div>
-      </header>
-
-      <div class="grid">
-        <!-- Flex Sensor Override Panel -->
-        <div class="panel">
-          <h2 class="toggle-header" onclick="togglePanel(this)">
-            🎮 Flex Sensor Override
-          </h2>
-          <div class="panel-content">
-            <div class="checkbox-group">
-              <input
-                type="checkbox"
-                id="overrideFlexEnabled"
-                onchange="toggleFlexOverride()"
-              />
-              <label for="overrideFlexEnabled">Enable Flex Override</label>
-            </div>
-
-            <div class="control-group">
-              <label>Flex Sensor 1-2 Range (%)</label>
-              <div class="range-inputs">
-                <div>
-                  <small>Min</small>
-                  <input
-                    type="number"
-                    id="flex12Min"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value="49"
-                    onchange="updateFlexRange('flex_1_2', 'min', this.value)"
-                  />
-                </div>
-                <div>
-                  <small>Max</small>
-                  <input
-                    type="number"
-                    id="flex12Max"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value="51"
-                    onchange="updateFlexRange('flex_1_2', 'max', this.value)"
-                  />
-                </div>
+        <button onclick="window.open('/', '_blank')" class="success">📊 Dashboard</button>
+        <button onclick="resetAll()" class="warning">🔄 Reset All</button>
+      </div>
+    </header>
+    
+    <div class="grid">
+      <!-- Flex Override -->
+      <div class="panel">
+        <div class="panel-header" onclick="togglePanel(this)">
+          <h2>🎮 Flex Sensor Override</h2>
+          <span class="toggle">▼</span>
+        </div>
+        <div class="panel-content">
+          <div class="checkbox-row">
+            <input type="checkbox" id="flexEnabled" onchange="updateOverride()">
+            <label for="flexEnabled">Enable Flex Override</label>
+          </div>
+          
+          <div class="checkbox-row warning-style">
+            <input type="checkbox" id="forwardServos" onchange="updateOverride()">
+            <label for="forwardServos">⚡ Forward Override to Servos</label>
+          </div>
+          
+          <!-- Flex 1-2 -->
+          <div class="sensor-section">
+            <h4>
+              <input type="checkbox" id="flex12Enabled" onchange="updateOverride()">
+              Servos 1-2 Range (%)
+            </h4>
+            <div class="range-row">
+              <div class="range-input">
+                <small>Min</small>
+                <input type="number" id="flex12Min" value="45" min="0" max="100" onchange="updateOverride()">
               </div>
-              <div class="value-display" id="flex12Value">49-51%</div>
-            </div>
-
-            <div class="control-group">
-              <label>Flex Sensor 3-4 Range (%)</label>
-              <div class="range-inputs">
-                <div>
-                  <small>Min</small>
-                  <input
-                    type="number"
-                    id="flex34Min"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value="49"
-                    onchange="updateFlexRange('flex_3_4', 'min', this.value)"
-                  />
-                </div>
-                <div>
-                  <small>Max</small>
-                  <input
-                    type="number"
-                    id="flex34Max"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value="51"
-                    onchange="updateFlexRange('flex_3_4', 'max', this.value)"
-                  />
-                </div>
+              <div class="range-input">
+                <small>Max</small>
+                <input type="number" id="flex12Max" value="55" min="0" max="100" onchange="updateOverride()">
               </div>
-              <div class="value-display" id="flex34Value">49-51%</div>
             </div>
-
-            <div class="control-group">
-              <label>Flex Sensor 5 Range (%)</label>
-              <div class="range-inputs">
-                <div>
-                  <small>Min</small>
-                  <input
-                    type="number"
-                    id="flex5Min"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value="49"
-                    onchange="updateFlexRange('flex_5', 'min', this.value)"
-                  />
-                </div>
-                <div>
-                  <small>Max</small>
-                  <input
-                    type="number"
-                    id="flex5Max"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value="51"
-                    onchange="updateFlexRange('flex_5', 'max', this.value)"
-                  />
-                </div>
-              </div>
-              <div class="value-display" id="flex5Value">49-51%</div>
-            </div>
-
-            <div class="preset-buttons">
-              <button onclick="setFlexPreset('open')">✋ Fully Open</button>
-              <button onclick="setFlexPreset('closed')">✊ Fully Closed</button>
-              <button onclick="setFlexPreset('neutral')">🖐️ Neutral</button>
-              <button onclick="setFlexPreset('random')">🎲 Random</button>
+            <div class="value-display" id="flex12Value">45 - 55%</div>
+            <div class="btn-grid">
+              <button onclick="setFlexPreset('flex_1_2', 0, 5)">Open</button>
+              <button onclick="setFlexPreset('flex_1_2', 45, 55)">Neutral</button>
+              <button onclick="setFlexPreset('flex_1_2', 95, 100)">Closed</button>
             </div>
           </div>
-        </div>
-
-        <!-- Biometric Override Panel -->
-        <div class="panel">
-          <h2 class="toggle-header" onclick="togglePanel(this)">
-            ❤️ Biometric Override
-          </h2>
-          <div class="panel-content">
-            <div class="checkbox-group">
-              <input
-                type="checkbox"
-                id="overrideBiometricEnabled"
-                onchange="toggleBiometricOverride()"
-              />
-              <label for="overrideBiometricEnabled">Enable Biometric Override</label>
-            </div>
-
-            <div class="control-group">
-              <label>Heart Rate Range (BPM)</label>
-              <div class="range-inputs">
-                <div>
-                  <small>Min</small>
-                  <input
-                    type="number"
-                    id="heartRateMin"
-                    min="40"
-                    max="180"
-                    value="70"
-                    onchange="updateBiometricRange('heart_rate', 'min', this.value)"
-                  />
-                </div>
-                <div>
-                  <small>Max</small>
-                  <input
-                    type="number"
-                    id="heartRateMax"
-                    min="40"
-                    max="180"
-                    value="80"
-                    onchange="updateBiometricRange('heart_rate', 'max', this.value)"
-                  />
-                </div>
+          
+          <!-- Flex 3-4 -->
+          <div class="sensor-section">
+            <h4>
+              <input type="checkbox" id="flex34Enabled" onchange="updateOverride()">
+              Servos 3-4 Range (%)
+            </h4>
+            <div class="range-row">
+              <div class="range-input">
+                <small>Min</small>
+                <input type="number" id="flex34Min" value="45" min="0" max="100" onchange="updateOverride()">
               </div>
-              <div class="value-display" id="heartRateValue">70-80</div>
-            </div>
-
-            <div class="control-group">
-              <label>SpO2 Range (%)</label>
-              <div class="range-inputs">
-                <div>
-                  <small>Min</small>
-                  <input
-                    type="number"
-                    id="spo2Min"
-                    min="80"
-                    max="100"
-                    value="97"
-                    onchange="updateBiometricRange('spo2', 'min', this.value)"
-                  />
-                </div>
-                <div>
-                  <small>Max</small>
-                  <input
-                    type="number"
-                    id="spo2Max"
-                    min="80"
-                    max="100"
-                    value="99"
-                    onchange="updateBiometricRange('spo2', 'max', this.value)"
-                  />
-                </div>
+              <div class="range-input">
+                <small>Max</small>
+                <input type="number" id="flex34Max" value="55" min="0" max="100" onchange="updateOverride()">
               </div>
-              <div class="value-display" id="spo2Value">97-99</div>
             </div>
-
-            <div class="preset-buttons">
-              <button onclick="setBiometricPreset('normal')">✅ Normal</button>
-              <button onclick="setBiometricPreset('elevated')">⚠️ Elevated</button>
-              <button onclick="setBiometricPreset('critical')">🚨 Critical</button>
-              <button onclick="setBiometricPreset('fluctuate')">📊 Fluctuate</button>
+            <div class="value-display" id="flex34Value">45 - 55%</div>
+            <div class="btn-grid">
+              <button onclick="setFlexPreset('flex_3_4', 0, 5)">Open</button>
+              <button onclick="setFlexPreset('flex_3_4', 45, 55)">Neutral</button>
+              <button onclick="setFlexPreset('flex_3_4', 95, 100)">Closed</button>
             </div>
           </div>
-        </div>
-
-        <!-- Mech Sensor Override Panel -->
-        <div class="panel">
-          <h2 class="toggle-header" onclick="togglePanel(this)">
-            🤖 Mech Sensor Override
-          </h2>
-          <div class="panel-content">
-            <div class="checkbox-group">
-              <input
-                type="checkbox"
-                id="overrideMechEnabled"
-                onchange="toggleMechOverride()"
-              />
-              <label for="overrideMechEnabled">Enable Mech Override</label>
-            </div>
-
-            <div class="control-group">
-              <label>Gas Sensor Range (%)</label>
-              <div class="range-inputs">
-                <div>
-                  <small>Min</small>
-                  <input
-                    type="number"
-                    id="gasMin"
-                    min="0"
-                    max="100"
-                    value="3"
-                    onchange="updateMechRange('gas', 'min', this.value)"
-                  />
-                </div>
-                <div>
-                  <small>Max</small>
-                  <input
-                    type="number"
-                    id="gasMax"
-                    min="0"
-                    max="100"
-                    value="7"
-                    onchange="updateMechRange('gas', 'max', this.value)"
-                  />
-                </div>
+          
+          <!-- Flex 5 -->
+          <div class="sensor-section">
+            <h4>
+              <input type="checkbox" id="flex5Enabled" onchange="updateOverride()">
+              Servo 5 Range (%)
+            </h4>
+            <div class="range-row">
+              <div class="range-input">
+                <small>Min</small>
+                <input type="number" id="flex5Min" value="45" min="0" max="100" onchange="updateOverride()">
               </div>
-              <div class="value-display" id="gasValue">3-7</div>
-            </div>
-
-            <div class="control-group">
-              <label>Temperature Range (°C)</label>
-              <div class="range-inputs">
-                <div>
-                  <small>Min</small>
-                  <input
-                    type="number"
-                    id="temperatureMin"
-                    min="10"
-                    max="40"
-                    step="0.5"
-                    value="23"
-                    onchange="updateMechRange('temperature', 'min', this.value)"
-                  />
-                </div>
-                <div>
-                  <small>Max</small>
-                  <input
-                    type="number"
-                    id="temperatureMax"
-                    min="10"
-                    max="40"
-                    step="0.5"
-                    value="25"
-                    onchange="updateMechRange('temperature', 'max', this.value)"
-                  />
-                </div>
+              <div class="range-input">
+                <small>Max</small>
+                <input type="number" id="flex5Max" value="55" min="0" max="100" onchange="updateOverride()">
               </div>
-              <div class="value-display" id="temperatureValue">23-25°C</div>
             </div>
-
-            <div class="control-group">
-              <label>Ultrasonic Distance Range (cm)</label>
-              <div class="range-inputs">
-                <div>
-                  <small>Min</small>
-                  <input
-                    type="number"
-                    id="ultrasonicMin"
-                    min="0"
-                    max="400"
-                    value="45"
-                    onchange="updateMechRange('ultrasonic', 'min', this.value)"
-                  />
-                </div>
-                <div>
-                  <small>Max</small>
-                  <input
-                    type="number"
-                    id="ultrasonicMax"
-                    min="0"
-                    max="400"
-                    value="55"
-                    onchange="updateMechRange('ultrasonic', 'max', this.value)"
-                  />
-                </div>
-              </div>
-              <div class="value-display" id="ultrasonicValue">45-55</div>
-            </div>
-
-            <div class="preset-buttons">
-              <button onclick="setMechPreset('safe')">✅ Safe</button>
-              <button onclick="setMechPreset('warning')">⚠️ Warning</button>
-              <button onclick="setMechPreset('danger')">🚨 Danger</button>
+            <div class="value-display" id="flex5Value">45 - 55%</div>
+            <div class="btn-grid">
+              <button onclick="setFlexPreset('flex_5', 0, 5)">Open</button>
+              <button onclick="setFlexPreset('flex_5', 45, 55)">Neutral</button>
+              <button onclick="setFlexPreset('flex_5', 95, 100)">Closed</button>
             </div>
           </div>
-        </div>
-
-        <!-- Alert Threshold Panel -->
-        <div class="panel">
-          <h2 class="toggle-header" onclick="togglePanel(this)">
-            ⚠️ Alert Thresholds
-          </h2>
-          <div class="panel-content">
-            <div class="info-box">
-              Configure when warnings, criticals, and emergencies trigger
-            </div>
-
-            <div class="control-group">
-              <label>Heart Rate Thresholds</label>
-              <div class="range-inputs">
-                <div>
-                  <small>Min Warning (BPM)</small>
-                  <input
-                    type="number"
-                    id="hrMinWarning"
-                    value="60"
-                    onchange="updateThreshold('heart_rate', 'min', this.value)"
-                  />
-                </div>
-                <div>
-                  <small>Max Warning (BPM)</small>
-                  <input
-                    type="number"
-                    id="hrMaxWarning"
-                    value="100"
-                    onchange="updateThreshold('heart_rate', 'max', this.value)"
-                  />
-                </div>
-                <div>
-                  <small>Critical Low (BPM)</small>
-                  <input
-                    type="number"
-                    id="hrCriticalLow"
-                    value="40"
-                    onchange="updateThreshold('heart_rate', 'critical_low', this.value)"
-                  />
-                </div>
-                <div>
-                  <small>Critical High (BPM)</small>
-                  <input
-                    type="number"
-                    id="hrCriticalHigh"
-                    value="150"
-                    onchange="updateThreshold('heart_rate', 'critical_high', this.value)"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div class="control-group">
-              <label>SpO2 Thresholds</label>
-              <div class="range-inputs">
-                <div>
-                  <small>Min Warning (%)</small>
-                  <input
-                    type="number"
-                    id="spo2MinWarning"
-                    value="95"
-                    onchange="updateThreshold('spo2', 'min', this.value)"
-                  />
-                </div>
-                <div>
-                  <small>Critical Low (%)</small>
-                  <input
-                    type="number"
-                    id="spo2CriticalLow"
-                    value="85"
-                    onchange="updateThreshold('spo2', 'critical_low', this.value)"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div class="control-group">
-              <label>Gas Thresholds</label>
-              <div class="range-inputs">
-                <div>
-                  <small>Max Warning (%)</small>
-                  <input
-                    type="number"
-                    id="gasMaxWarning"
-                    value="30"
-                    onchange="updateThreshold('gas', 'max', this.value)"
-                  />
-                </div>
-                <div>
-                  <small>Critical High (%)</small>
-                  <input
-                    type="number"
-                    id="gasCriticalHigh"
-                    value="50"
-                    onchange="updateThreshold('gas', 'critical_high', this.value)"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div class="control-group">
-              <label>Temperature Thresholds</label>
-              <div class="range-inputs">
-                <div>
-                  <small>Min Warning (°C)</small>
-                  <input
-                    type="number"
-                    id="tempMinWarning"
-                    value="20"
-                    onchange="updateThreshold('temperature', 'min', this.value)"
-                  />
-                </div>
-                <div>
-                  <small>Max Warning (°C)</small>
-                  <input
-                    type="number"
-                    id="tempMaxWarning"
-                    value="48"
-                    onchange="updateThreshold('temperature', 'max', this.value)"
-                  />
-                </div>
-                <div>
-                  <small>Critical Low (°C)</small>
-                  <input
-                    type="number"
-                    id="tempCriticalLow"
-                    value="15"
-                    onchange="updateThreshold('temperature', 'critical_low', this.value)"
-                  />
-                </div>
-                <div>
-                  <small>Critical High (°C)</small>
-                  <input
-                    type="number"
-                    id="tempCriticalHigh"
-                    value="35"
-                    onchange="updateThreshold('temperature', 'critical_high', this.value)"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <button onclick="resetThresholds()" class="warning">
-              Reset to Defaults
-            </button>
-          </div>
-        </div>
-
-        <!-- Emergency Control Panel -->
-        <div class="panel">
-          <h2 class="toggle-header" onclick="togglePanel(this)">
-            🚨 Emergency Control
-          </h2>
-          <div class="panel-content">
-            <div class="danger-box">
-              <strong>⚠️ Warning:</strong> These controls affect ALL devices
-              (hand, mech, and websites)
-            </div>
-
-            <div class="button-group">
-              <button onclick="triggerEmergency()" class="danger">
-                🚨 Trigger Emergency
-              </button>
-              <button onclick="acknowledgeEmergency()" class="success">
-                ✅ Acknowledge Emergency
-              </button>
-            </div>
-
-            <div class="control-group">
-              <label>Simulate Alert Level</label>
-              <select id="alertLevelSelect" onchange="simulateAlert()">
-                <option value="normal">Normal</option>
-                <option value="warning">Warning</option>
-                <option value="critical">Critical</option>
-                <option value="emergency">Emergency</option>
-              </select>
-            </div>
-
-            <div class="checkbox-group">
-              <input
-                type="checkbox"
-                id="autoEmergencyEnabled"
-                onchange="toggleAutoEmergency()"
-              />
-              <label for="autoEmergencyEnabled">Enable Auto-Emergency Detection</label>
-            </div>
-          </div>
-        </div>
-
-        <!-- Activity Log Panel -->
-        <div class="panel">
-          <h2 class="toggle-header" onclick="togglePanel(this)">
-            📋 Activity Log
-          </h2>
-          <div class="panel-content">
-            <div class="log-container" id="activityLog">
-              <div class="log-entry">
-                <span class="log-time">--:--:--</span>
-                <span class="log-action">System Ready</span>
-              </div>
-            </div>
-            <button onclick="clearLog()" style="margin-top: 10px">Clear Log</button>
+          
+          <div class="btn-grid">
+            <button onclick="setAllFlexPreset('open')">✋ All Open</button>
+            <button onclick="setAllFlexPreset('neutral')">🖐️ All Neutral</button>
+            <button onclick="setAllFlexPreset('closed')">✊ All Closed</button>
           </div>
         </div>
       </div>
-    </div>
-
-    <script>
-      let ws = null;
-      let overrideState = {
-        flex: {
-          enabled: false,
-          flex_1_2: { min: 49, max: 51 },
-          flex_3_4: { min: 49, max: 51 },
-          flex_5: { min: 49, max: 51 },
-        },
-        biometric: {
-          enabled: false,
-          heart_rate: { min: 70, max: 80 },
-          spo2: { min: 97, max: 99 },
-        },
-        mech: {
-          enabled: false,
-          gas: { min: 3, max: 7 },
-          temperature: { min: 23, max: 25 },
-          ultrasonic: { min: 45, max: 55 },
-        },
-        thresholds: {
-          heart_rate: { min: 60, max: 100, critical_low: 40, critical_high: 150 },
-          spo2: { min: 95, max: 100, critical_low: 85, critical_high: 100 },
-          temperature: { min: 20, max: 48, critical_low: 15, critical_high: 35 },
-          gas: { min: 0, max: 30, critical_low: 0, critical_high: 50 },
-          ultrasonic: { min: 5, max: 10000, critical_low: 0, critical_high: 2000 },
-        },
-        autoEmergency: true,
-      };
-
-      let fluctuateIntervals = {};
-      let sendIntervals = {};
-
-      // WebSocket Connection
-      function connectWebSocket() {
-        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-        const wsUrl = `${protocol}//${window.location.hostname}:8081`;
-
-        ws = new WebSocket(wsUrl);
-
-        ws.onopen = () => {
-          console.log("Connected to server");
-          document.getElementById("connectionStatus").classList.add("connected");
-          document.getElementById("connectionText").textContent = "Connected";
-          
-          // Identify as admin
-          ws.send(JSON.stringify({ type: "identify", client: "admin" }));
-          
-          logAction("Connected to server");
-          
-          // Send initial override state
-          sendOverrideState();
-        };
-
-        ws.onclose = () => {
-          console.log("Disconnected from server");
-          document.getElementById("connectionStatus").classList.remove("connected");
-          document.getElementById("connectionText").textContent = "Disconnected";
-          logAction("Disconnected from server", "danger");
-          
-          // Reconnect after 3 seconds
-          setTimeout(connectWebSocket, 3000);
-        };
-
-        ws.onerror = (error) => {
-          console.error("WebSocket error:", error);
-          logAction("WebSocket error", "danger");
-        };
-
-        ws.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            // Handle any messages from server if needed
-          } catch (error) {
-            console.error("Error parsing message:", error);
-          }
-        };
-      }
-
-      // Utility function to get random value in range
-      function getRandomInRange(min, max, decimals = 1) {
-        const value = min + Math.random() * (max - min);
-        return decimals === 0 ? Math.round(value) : parseFloat(value.toFixed(decimals));
-      }
-
-      // Send override state to server
-      function sendOverrideState() {
-        if (!ws || ws.readyState !== WebSocket.OPEN) return;
-
-        ws.send(
-          JSON.stringify({
-            type: "admin_override",
-            overrideState: overrideState,
-          })
-        );
-
-        updateOverrideStatus();
-      }
-
-      function updateOverrideStatus() {
-        const anyActive =
-          overrideState.flex.enabled ||
-          overrideState.biometric.enabled ||
-          overrideState.mech.enabled;
-        document.getElementById("overrideStatus").textContent = anyActive
-          ? "Yes"
-          : "No";
-      }
-
-      // Flex Sensor Controls
-      function toggleFlexOverride() {
-        const enabled = document.getElementById("overrideFlexEnabled").checked;
-        overrideState.flex.enabled = enabled;
-        
-        if (enabled) {
-          // Start sending randomized flex data
-          startFlexDataSending();
-        } else {
-          // Stop sending
-          stopFlexDataSending();
-        }
-        
-        sendOverrideState();
-        logAction(`Flex override ${enabled ? "enabled" : "disabled"}`);
-      }
-
-      function updateFlexRange(sensor, type, value) {
-        overrideState.flex[sensor][type] = parseFloat(value);
-        const min = overrideState.flex[sensor].min;
-        const max = overrideState.flex[sensor].max;
-        
-        document.getElementById(
-          sensor.replace("_", "") + "Value"
-        ).textContent = `${min}-${max}%`;
-        
-        if (overrideState.flex.enabled) {
-          sendOverrideState();
-        }
-      }
-
-      function startFlexDataSending() {
-        stopFlexDataSending(); // Clear any existing interval
-        
-        sendIntervals.flex = setInterval(() => {
-          if (!overrideState.flex.enabled) return;
-          
-          const flex_1_2 = getRandomInRange(
-            overrideState.flex.flex_1_2.min,
-            overrideState.flex.flex_1_2.max
-          );
-          const flex_3_4 = getRandomInRange(
-            overrideState.flex.flex_3_4.min,
-            overrideState.flex.flex_3_4.max
-          );
-          const flex_5 = getRandomInRange(
-            overrideState.flex.flex_5.min,
-            overrideState.flex.flex_5.max
-          );
-          
-          sendOverrideState();
-        }, 100); // Send every 100ms
-      }
-
-      function stopFlexDataSending() {
-        if (sendIntervals.flex) {
-          clearInterval(sendIntervals.flex);
-          delete sendIntervals.flex;
-        }
-      }
-
-      function setFlexPreset(preset) {
-        let ranges;
-        switch (preset) {
-          case "open":
-            ranges = {
-              flex_1_2: { min: 0, max: 5 },
-              flex_3_4: { min: 0, max: 5 },
-              flex_5: { min: 0, max: 5 },
-            };
-            break;
-          case "closed":
-            ranges = {
-              flex_1_2: { min: 95, max: 100 },
-              flex_3_4: { min: 95, max: 100 },
-              flex_5: { min: 95, max: 100 },
-            };
-            break;
-          case "neutral":
-            ranges = {
-              flex_1_2: { min: 49, max: 51 },
-              flex_3_4: { min: 49, max: 51 },
-              flex_5: { min: 49, max: 51 },
-            };
-            break;
-          case "random":
-            ranges = {
-              flex_1_2: { min: Math.random() * 50, max: 50 + Math.random() * 50 },
-              flex_3_4: { min: Math.random() * 50, max: 50 + Math.random() * 50 },
-              flex_5: { min: Math.random() * 50, max: 50 + Math.random() * 50 },
-            };
-            break;
-        }
-
-        overrideState.flex.flex_1_2 = ranges.flex_1_2;
-        overrideState.flex.flex_3_4 = ranges.flex_3_4;
-        overrideState.flex.flex_5 = ranges.flex_5;
-
-        document.getElementById("flex12Min").value = ranges.flex_1_2.min.toFixed(0);
-        document.getElementById("flex12Max").value = ranges.flex_1_2.max.toFixed(0);
-        document.getElementById("flex34Min").value = ranges.flex_3_4.min.toFixed(0);
-        document.getElementById("flex34Max").value = ranges.flex_3_4.max.toFixed(0);
-        document.getElementById("flex5Min").value = ranges.flex_5.min.toFixed(0);
-        document.getElementById("flex5Max").value = ranges.flex_5.max.toFixed(0);
-
-        document.getElementById("flex12Value").textContent = 
-          `${ranges.flex_1_2.min.toFixed(0)}-${ranges.flex_1_2.max.toFixed(0)}%`;
-        document.getElementById("flex34Value").textContent = 
-          `${ranges.flex_3_4.min.toFixed(0)}-${ranges.flex_3_4.max.toFixed(0)}%`;
-        document.getElementById("flex5Value").textContent = 
-          `${ranges.flex_5.min.toFixed(0)}-${ranges.flex_5.max.toFixed(0)}%`;
-
-        if (overrideState.flex.enabled) {
-          sendOverrideState();
-        }
-
-        logAction(`Flex preset: ${preset}`);
-      }
-
-      // Biometric Controls
-      function toggleBiometricOverride() {
-        const enabled = document.getElementById("overrideBiometricEnabled").checked;
-        overrideState.biometric.enabled = enabled;
-        
-        if (enabled) {
-          startBiometricDataSending();
-        } else {
-          stopBiometricDataSending();
-        }
-        
-        sendOverrideState();
-        logAction(`Biometric override ${enabled ? "enabled" : "disabled"}`);
-      }
-
-      function updateBiometricRange(sensor, type, value) {
-        overrideState.biometric[sensor][type] = parseFloat(value);
-        const min = overrideState.biometric[sensor].min;
-        const max = overrideState.biometric[sensor].max;
-        
-        const displayValue = sensor === "heart_rate" ? 
-          `${min.toFixed(0)}-${max.toFixed(0)}` : 
-          `${min.toFixed(0)}-${max.toFixed(0)}`;
-          
-        document.getElementById(
-          sensor.replace("_", "") + "Value"
-        ).textContent = displayValue;
-        
-        if (overrideState.biometric.enabled) {
-          sendOverrideState();
-        }
-      }
-
-      function startBiometricDataSending() {
-        stopBiometricDataSending();
-        
-        sendIntervals.biometric = setInterval(() => {
-          if (!overrideState.biometric.enabled) return;
-          sendOverrideState();
-        }, 2000); // Send every 2 seconds
-      }
-
-      function stopBiometricDataSending() {
-        if (sendIntervals.biometric) {
-          clearInterval(sendIntervals.biometric);
-          delete sendIntervals.biometric;
-        }
-        // Also clear fluctuate if active
-        if (fluctuateIntervals.biometric) {
-          clearInterval(fluctuateIntervals.biometric);
-          delete fluctuateIntervals.biometric;
-        }
-      }
-
-      function setBiometricPreset(preset) {
-        // Clear any existing fluctuation
-        if (fluctuateIntervals.biometric) {
-          clearInterval(fluctuateIntervals.biometric);
-          delete fluctuateIntervals.biometric;
-        }
-
-        let ranges;
-        switch (preset) {
-          case "normal":
-            ranges = {
-              heart_rate: { min: 70, max: 80 },
-              spo2: { min: 97, max: 99 },
-            };
-            break;
-          case "elevated":
-            ranges = {
-              heart_rate: { min: 105, max: 115 },
-              spo2: { min: 93, max: 95 },
-            };
-            break;
-          case "critical":
-            ranges = {
-              heart_rate: { min: 155, max: 165 },
-              spo2: { min: 80, max: 84 },
-            };
-            break;
-          case "fluctuate":
-            // Wide fluctuating ranges
-            ranges = {
-              heart_rate: { min: 60, max: 100 },
-              spo2: { min: 95, max: 100 },
-            };
-            overrideState.biometric.heart_rate = ranges.heart_rate;
-            overrideState.biometric.spo2 = ranges.spo2;
-            
-            document.getElementById("heartRateMin").value = ranges.heart_rate.min;
-            document.getElementById("heartRateMax").value = ranges.heart_rate.max;
-            document.getElementById("spo2Min").value = ranges.spo2.min;
-            document.getElementById("spo2Max").value = ranges.spo2.max;
-            
-            document.getElementById("heartRateValue").textContent = 
-              `${ranges.heart_rate.min}-${ranges.heart_rate.max}`;
-            document.getElementById("spo2Value").textContent = 
-              `${ranges.spo2.min}-${ranges.spo2.max}`;
-            
-            logAction("Biometric fluctuation started");
-            if (overrideState.biometric.enabled) {
-              sendOverrideState();
-            }
-            return;
-        }
-
-        overrideState.biometric.heart_rate = ranges.heart_rate;
-        overrideState.biometric.spo2 = ranges.spo2;
-
-        document.getElementById("heartRateMin").value = ranges.heart_rate.min;
-        document.getElementById("heartRateMax").value = ranges.heart_rate.max;
-        document.getElementById("spo2Min").value = ranges.spo2.min;
-        document.getElementById("spo2Max").value = ranges.spo2.max;
-
-        document.getElementById("heartRateValue").textContent = 
-          `${ranges.heart_rate.min}-${ranges.heart_rate.max}`;
-        document.getElementById("spo2Value").textContent = 
-          `${ranges.spo2.min}-${ranges.spo2.max}`;
-
-        if (overrideState.biometric.enabled) {
-          sendOverrideState();
-        }
-
-        logAction(`Biometric preset: ${preset}`);
-      }
-
-      // Mech Sensor Controls
-      function toggleMechOverride() {
-        const enabled = document.getElementById("overrideMechEnabled").checked;
-        overrideState.mech.enabled = enabled;
-        
-        if (enabled) {
-          startMechDataSending();
-        } else {
-          stopMechDataSending();
-        }
-        
-        sendOverrideState();
-        logAction(`Mech override ${enabled ? "enabled" : "disabled"}`);
-      }
-
-      function updateMechRange(sensor, type, value) {
-        overrideState.mech[sensor][type] = parseFloat(value);
-        const min = overrideState.mech[sensor].min;
-        const max = overrideState.mech[sensor].max;
-        
-        const displayValue = sensor === "temperature" ? 
-          `${min.toFixed(1)}-${max.toFixed(1)}°C` : 
-          `${min.toFixed(0)}-${max.toFixed(0)}`;
-          
-        document.getElementById(sensor + "Value").textContent = displayValue;
-        
-        if (overrideState.mech.enabled) {
-          sendOverrideState();
-        }
-      }
-
-      function startMechDataSending() {
-        stopMechDataSending();
-        
-        sendIntervals.mech = setInterval(() => {
-          if (!overrideState.mech.enabled) return;
-          sendOverrideState();
-        }, 1000); // Send every second
-      }
-
-      function stopMechDataSending() {
-        if (sendIntervals.mech) {
-          clearInterval(sendIntervals.mech);
-          delete sendIntervals.mech;
-        }
-      }
-
-      function setMechPreset(preset) {
-        let ranges;
-        switch (preset) {
-          case "safe":
-            ranges = {
-              gas: { min: 3, max: 7 },
-              temperature: { min: 23, max: 25 },
-              ultrasonic: { min: 95, max: 105 },
-            };
-            break;
-          case "warning":
-            ranges = {
-              gas: { min: 32, max: 38 },
-              temperature: { min: 47, max: 49 },
-              ultrasonic: { min: 8, max: 12 },
-            };
-            break;
-          case "danger":
-            ranges = {
-              gas: { min: 58, max: 65 },
-              temperature: { min: 37, max: 39 },
-              ultrasonic: { min: 1, max: 3 },
-            };
-            break;
-        }
-
-        overrideState.mech.gas = ranges.gas;
-        overrideState.mech.temperature = ranges.temperature;
-        overrideState.mech.ultrasonic = ranges.ultrasonic;
-
-        document.getElementById("gasMin").value = ranges.gas.min;
-        document.getElementById("gasMax").value = ranges.gas.max;
-        document.getElementById("temperatureMin").value = ranges.temperature.min;
-        document.getElementById("temperatureMax").value = ranges.temperature.max;
-        document.getElementById("ultrasonicMin").value = ranges.ultrasonic.min;
-        document.getElementById("ultrasonicMax").value = ranges.ultrasonic.max;
-
-        document.getElementById("gasValue").textContent = 
-          `${ranges.gas.min}-${ranges.gas.max}`;
-        document.getElementById("temperatureValue").textContent = 
-          `${ranges.temperature.min}-${ranges.temperature.max}°C`;
-        document.getElementById("ultrasonicValue").textContent = 
-          `${ranges.ultrasonic.min}-${ranges.ultrasonic.max}`;
-
-        if (overrideState.mech.enabled) {
-          sendOverrideState();
-        }
-
-        logAction(`Mech preset: ${preset}`);
-      }
-
-      // Threshold Controls
-      function updateThreshold(sensor, type, value) {
-        overrideState.thresholds[sensor][type] = parseFloat(value);
-        sendOverrideState();
-        logAction(`Updated ${sensor} ${type} threshold to ${value}`);
-      }
-
-      function resetThresholds() {
-        overrideState.thresholds = {
-          heart_rate: { min: 60, max: 100, critical_low: 40, critical_high: 150 },
-          spo2: { min: 95, max: 100, critical_low: 85, critical_high: 100 },
-          temperature: { min: 20, max: 48, critical_low: 15, critical_high: 35 },
-          gas: { min: 0, max: 30, critical_low: 0, critical_high: 50 },
-          ultrasonic: { min: 5, max: 10000, critical_low: 0, critical_high: 2000 },
-        };
-
-        // Update UI
-        document.getElementById("hrMinWarning").value = 60;
-        document.getElementById("hrMaxWarning").value = 100;
-        document.getElementById("hrCriticalLow").value = 40;
-        document.getElementById("hrCriticalHigh").value = 150;
-        document.getElementById("spo2MinWarning").value = 95;
-        document.getElementById("spo2CriticalLow").value = 85;
-        document.getElementById("gasMaxWarning").value = 30;
-        document.getElementById("gasCriticalHigh").value = 50;
-        document.getElementById("tempMinWarning").value = 20;
-        document.getElementById("tempMaxWarning").value = 48;
-        document.getElementById("tempCriticalLow").value = 15;
-        document.getElementById("tempCriticalHigh").value = 35;
-
-        sendOverrideState();
-        logAction("Thresholds reset to defaults");
-      }
-
-      // Emergency Controls
-      function triggerEmergency() {
-        if (
-          !confirm(
-            "⚠️ This will trigger an emergency on ALL devices. Continue?"
-          )
-        ) {
-          return;
-        }
-
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          alert("Not connected to server");
-          return;
-        }
-
-        ws.send(
-          JSON.stringify({
-            type: "emergency_alert",
-            active: true,
-            source: "admin",
-            timestamp: Date.now(),
-          })
-        );
-
-        logAction("Emergency triggered", "danger");
-      }
-
-      function acknowledgeEmergency() {
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          alert("Not connected to server");
-          return;
-        }
-
-        ws.send(
-          JSON.stringify({
-            type: "emergency_ack",
-            timestamp: Date.now(),
-          })
-        );
-
-        logAction("Emergency acknowledged", "success");
-      }
-
-      function simulateAlert() {
-        const level = document.getElementById("alertLevelSelect").value;
-
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-          alert("Not connected to server");
-          return;
-        }
-
-        if (level === "normal") {
-          logAction("Alert level set to normal");
-          return;
-        }
-
-        const abnormal = [];
-        
-        if (level === "warning") {
-          abnormal.push({ sensor: "heart_rate", value: 110 });
-        } else if (level === "critical") {
-          abnormal.push({ sensor: "heart_rate", value: 110 });
-          abnormal.push({ sensor: "gas", value: 35 });
-        } else if (level === "emergency") {
-          abnormal.push({ sensor: "heart_rate", value: 170 });
-          abnormal.push({ sensor: "spo2", value: 80 });
-          abnormal.push({ sensor: "gas", value: 60 });
-        }
-
-        ws.send(
-          JSON.stringify({
-            type: "vital_alert",
-            level: level,
-            abnormal: abnormal,
-            timestamp: Date.now(),
-          })
-        );
-
-        logAction(`Simulated ${level} alert`, level);
-      }
-
-      function toggleAutoEmergency() {
-        overrideState.autoEmergency = document.getElementById(
-          "autoEmergencyEnabled"
-        ).checked;
-        sendOverrideState();
-        logAction(
-          `Auto-emergency ${
-            overrideState.autoEmergency ? "enabled" : "disabled"
-          }`
-        );
-      }
-
-      // Reset All
-      function resetAllOverrides() {
-        if (!confirm("Reset all overrides to default values?")) return;
-
-        // Stop all intervals
-        Object.keys(fluctuateIntervals).forEach((key) => {
-          clearInterval(fluctuateIntervals[key]);
-        });
-        fluctuateIntervals = {};
-        
-        Object.keys(sendIntervals).forEach((key) => {
-          clearInterval(sendIntervals[key]);
-        });
-        sendIntervals = {};
-
-        // Reset checkboxes
-        document.getElementById("overrideFlexEnabled").checked = false;
-        document.getElementById("overrideBiometricEnabled").checked = false;
-        document.getElementById("overrideMechEnabled").checked = false;
-        document.getElementById("autoEmergencyEnabled").checked = true;
-
-        // Reset values
-        overrideState = {
-          flex: {
-            enabled: false,
-            flex_1_2: { min: 49, max: 51 },
-            flex_3_4: { min: 49, max: 51 },
-            flex_5: { min: 49, max: 51 },
-          },
-          biometric: {
-            enabled: false,
-            heart_rate: { min: 70, max: 80 },
-            spo2: { min: 97, max: 99 },
-          },
-          mech: {
-            enabled: false,
-            gas: { min: 3, max: 7 },
-            temperature: { min: 23, max: 25 },
-            ultrasonic: { min: 45, max: 55 },
-          },
-          thresholds: {
-            heart_rate: { min: 60, max: 100, critical_low: 40, critical_high: 150 },
-            spo2: { min: 95, max: 100, critical_low: 85, critical_high: 100 },
-            temperature: { min: 20, max: 48, critical_low: 15, critical_high: 35 },
-            gas: { min: 0, max: 30, critical_low: 0, critical_high: 50 },
-            ultrasonic: { min: 5, max: 10000, critical_low: 0, critical_high: 2000 },
-          },
-          autoEmergency: true,
-        };
-
-        // Reset UI
-        setFlexPreset("neutral");
-        setBiometricPreset("normal");
-        setMechPreset("safe");
-        resetThresholds();
-
-        sendOverrideState();
-        logAction("All overrides reset", "warning");
-      }
-
-      // UI Helpers
-      function togglePanel(header) {
-        header.classList.toggle("collapsed");
-        const content = header.nextElementSibling;
-        content.classList.toggle("collapsed");
-        
-        if (!content.classList.contains("collapsed")) {
-          content.style.maxHeight = content.scrollHeight + "px";
-        }
-      }
-
-      function logAction(message, type = "info") {
-        const log = document.getElementById("activityLog");
-        const entry = document.createElement("div");
-        entry.className = "log-entry";
-
-        const time = new Date().toLocaleTimeString();
-        const timeSpan = document.createElement("span");
-        timeSpan.className = "log-time";
-        timeSpan.textContent = time;
-
-        const actionSpan = document.createElement("span");
-        actionSpan.className = "log-action";
-        actionSpan.textContent = message;
-        actionSpan.style.color =
-          type === "danger"
-            ? "#e74c3c"
-            : type === "success"
-            ? "#2ecc71"
-            : type === "warning"
-            ? "#f39c12"
-            : "#3498db";
-
-        entry.appendChild(timeSpan);
-        entry.appendChild(actionSpan);
-
-        log.insertBefore(entry, log.firstChild);
-
-        // Keep only last 50 entries
-        while (log.children.length > 50) {
-          log.removeChild(log.lastChild);
-        }
-      }
-
-      function clearLog() {
-        const log = document.getElementById("activityLog");
-        log.innerHTML = `
-          <div class="log-entry">
-            <span class="log-time">--:--:--</span>
-            <span class="log-action">Log cleared</span>
+      
+      <!-- Biometric Override -->
+      <div class="panel">
+        <div class="panel-header" onclick="togglePanel(this)">
+          <h2>❤️ Biometric Override</h2>
+          <span class="toggle">▼</span>
+        </div>
+        <div class="panel-content">
+          <div class="checkbox-row">
+            <input type="checkbox" id="bioEnabled" onchange="updateOverride()">
+            <label for="bioEnabled">Enable Biometric Override</label>
           </div>
-        `;
+          
+          <div class="control-group">
+            <label>Heart Rate Range (BPM)</label>
+            <div class="range-row">
+              <div class="range-input">
+                <small>Min</small>
+                <input type="number" id="hrMin" value="70" min="40" max="180" onchange="updateOverride()">
+              </div>
+              <div class="range-input">
+                <small>Max</small>
+                <input type="number" id="hrMax" value="80" min="40" max="180" onchange="updateOverride()">
+              </div>
+            </div>
+            <div class="value-display" id="hrValue">70 - 80 BPM</div>
+          </div>
+          
+          <div class="control-group">
+            <label>SpO2 Range (%)</label>
+            <div class="range-row">
+              <div class="range-input">
+                <small>Min</small>
+                <input type="number" id="spo2Min" value="97" min="80" max="100" onchange="updateOverride()">
+              </div>
+              <div class="range-input">
+                <small>Max</small>
+                <input type="number" id="spo2Max" value="99" min="80" max="100" onchange="updateOverride()">
+              </div>
+            </div>
+            <div class="value-display" id="spo2Value">97 - 99%</div>
+          </div>
+          
+          <div class="btn-grid">
+            <button onclick="setBioPreset('normal')">✅ Normal</button>
+            <button onclick="setBioPreset('elevated')">⚠️ Elevated</button>
+            <button onclick="setBioPreset('critical')">🚨 Critical</button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Mech Override -->
+      <div class="panel">
+        <div class="panel-header" onclick="togglePanel(this)">
+          <h2>🤖 Mech Sensor Override</h2>
+          <span class="toggle">▼</span>
+        </div>
+        <div class="panel-content">
+          <div class="checkbox-row">
+            <input type="checkbox" id="mechEnabled" onchange="updateOverride()">
+            <label for="mechEnabled">Enable Mech Override</label>
+          </div>
+          
+          <div class="control-group">
+            <label>Gas Range (%)</label>
+            <div class="range-row">
+              <div class="range-input">
+                <small>Min</small>
+                <input type="number" id="gasMin" value="3" min="0" max="100" onchange="updateOverride()">
+              </div>
+              <div class="range-input">
+                <small>Max</small>
+                <input type="number" id="gasMax" value="7" min="0" max="100" onchange="updateOverride()">
+              </div>
+            </div>
+          </div>
+          
+          <div class="control-group">
+            <label>Temperature Range (°C)</label>
+            <div class="range-row">
+              <div class="range-input">
+                <small>Min</small>
+                <input type="number" id="tempMin" value="23" min="10" max="50" step="0.5" onchange="updateOverride()">
+              </div>
+              <div class="range-input">
+                <small>Max</small>
+                <input type="number" id="tempMax" value="25" min="10" max="60" step="0.5" onchange="updateOverride()">
+              </div>
+            </div>
+          </div>
+          
+          <div class="control-group">
+            <label>Distance Range (cm)</label>
+            <div class="range-row">
+              <div class="range-input">
+                <small>Min</small>
+                <input type="number" id="distMin" value="45" min="0" max="400" onchange="updateOverride()">
+              </div>
+              <div class="range-input">
+                <small>Max</small>
+                <input type="number" id="distMax" value="55" min="0" max="400" onchange="updateOverride()">
+              </div>
+            </div>
+          </div>
+          
+          <div class="btn-grid">
+            <button onclick="setMechPreset('safe')">✅ Safe</button>
+            <button onclick="setMechPreset('warning')">⚠️ Warning</button>
+            <button onclick="setMechPreset('danger')">🚨 Danger</button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Thresholds -->
+      <div class="panel">
+        <div class="panel-header" onclick="togglePanel(this)">
+          <h2>⚠️ Alert Thresholds</h2>
+          <span class="toggle">▼</span>
+        </div>
+        <div class="panel-content">
+          <div class="info-box">
+            Configure when warnings and emergencies trigger based on sensor readings.
+          </div>
+          
+          <div class="control-group">
+            <label>Temperature (°C)</label>
+            <div class="threshold-grid">
+              <div class="range-input">
+                <small>Critical Low</small>
+                <input type="number" id="tempCritLow" value="15" onchange="updateThresholds()">
+              </div>
+              <div class="range-input">
+                <small>Min Warn</small>
+                <input type="number" id="tempWarnMin" value="20" onchange="updateThresholds()">
+              </div>
+              <div class="range-input">
+                <small>Max Warn</small>
+                <input type="number" id="tempWarnMax" value="50" onchange="updateThresholds()">
+              </div>
+              <div class="range-input">
+                <small>Critical High</small>
+                <input type="number" id="tempCritHigh" value="55" onchange="updateThresholds()">
+              </div>
+            </div>
+          </div>
+          
+          <div class="control-group">
+            <label>Gas (%)</label>
+            <div class="range-row">
+              <div class="range-input">
+                <small>Max Warning</small>
+                <input type="number" id="gasWarnMax" value="30" onchange="updateThresholds()">
+              </div>
+              <div class="range-input">
+                <small>Critical High</small>
+                <input type="number" id="gasCritHigh" value="50" onchange="updateThresholds()">
+              </div>
+            </div>
+          </div>
+          
+          <button onclick="resetThresholds()" class="warning" style="width: 100%; margin-top: 0.5rem;">Reset to Defaults</button>
+          <div class="btn-grid" style="margin-top: 0.5rem;">
+            <button onclick="setThresholdPreset('balanced')">Balanced</button>
+            <button onclick="setThresholdPreset('highTemp')">50/55C Profile</button>
+            <button onclick="setThresholdPreset('strict')">Strict</button>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Emergency -->
+      <div class="panel">
+        <div class="panel-header" onclick="togglePanel(this)">
+          <h2>🚨 Emergency Control</h2>
+          <span class="toggle">▼</span>
+        </div>
+        <div class="panel-content">
+          <div class="danger-box">
+            ⚠️ These controls affect ALL connected devices (hand, mech, websites).
+          </div>
+          
+          <div class="checkbox-row">
+            <input type="checkbox" id="autoEmergency" checked onchange="updateOverride()">
+            <label for="autoEmergency">Enable Auto-Emergency Detection</label>
+          </div>
+          
+          <div class="btn-group" style="margin-top: 1rem;">
+            <button class="danger" onclick="triggerEmergency()">🚨 Trigger Emergency</button>
+            <button class="success" onclick="clearEmergency()">✅ Clear Emergency</button>
+          </div>
+
+          <div class="btn-grid" style="margin-top: 0.75rem;">
+            <button onclick="applyScenario('heat')" class="danger">Heat Spike</button>
+            <button onclick="applyScenario('gas')" class="danger">Gas Leak</button>
+            <button onclick="applyScenario('distance')" class="warning">Obstacle Near</button>
+            <button onclick="applyScenario('multi')" class="danger">Multi-Critical</button>
+          </div>
+
+          <div class="reason-card">
+            <div class="reason-title" id="reasonTitle">No active emergency reason</div>
+            <div class="reason-detail" id="reasonDetail">Detailed abnormal readings will appear here when emergency is active.</div>
+            <ul class="abnormal-list" id="abnormalList"></ul>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Activity Log -->
+      <div class="panel">
+        <div class="panel-header" onclick="togglePanel(this)">
+          <h2>📋 Activity Log</h2>
+          <span class="toggle">▼</span>
+        </div>
+        <div class="panel-content">
+          <div class="log-container" id="logContainer">
+            <div class="log-entry">
+              <span class="log-time">--:--:--</span>
+              <span class="log-msg">System ready</span>
+            </div>
+          </div>
+          <button onclick="clearLog()" style="margin-top: 0.75rem; width: 100%;">Clear Log</button>
+        </div>
+      </div>
+    </div>
+    
+    <footer>
+      Admin Panel © 2025 | <a href="/">Back to Dashboard</a>
+    </footer>
+  </div>
+  
+  <script>
+    // ========================================
+    // State
+    // ========================================
+    
+    let ws = null;
+    
+    const overrideState = {
+      flex: {
+        enabled: false,
+        forwardToServos: false,
+        flex_1_2: { enabled: false, min: 45, max: 55 },
+        flex_3_4: { enabled: false, min: 45, max: 55 },
+        flex_5: { enabled: false, min: 45, max: 55 }
+      },
+      biometric: {
+        enabled: false,
+        heart_rate: { min: 70, max: 80 },
+        spo2: { min: 97, max: 99 }
+      },
+      mech: {
+        enabled: false,
+        gas: { min: 3, max: 7 },
+        temperature: { min: 23, max: 25 },
+        ultrasonic: { min: 45, max: 55 }
+      },
+      thresholds: {
+        temperature: { min: 20, max: 50, critical_low: 15, critical_high: 55 },
+        gas: { min: 0, max: 30, critical_low: 0, critical_high: 50 }
+      },
+      autoEmergency: true
+    };
+    
+    // ========================================
+    // WebSocket
+    // ========================================
+    
+    function connect() {
+      const wsUrl = `ws://${window.location.hostname}:8081`;
+      ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        document.getElementById('wsStatus').classList.add('connected');
+        document.getElementById('wsStatusText').textContent = 'Connected';
+        ws.send(JSON.stringify({ type: 'identify', client: 'admin' }));
+        log('Connected to server', 'success');
+      };
+      
+      ws.onclose = () => {
+        document.getElementById('wsStatus').classList.remove('connected');
+        document.getElementById('wsStatusText').textContent = 'Disconnected';
+        log('Disconnected', 'danger');
+        setTimeout(connect, 3000);
+      };
+      
+      ws.onerror = (err) => {
+        console.error('WS Error:', err);
+        log('Connection error', 'danger');
+      };
+      
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'admin.override_state' && msg.payload?.overrideState) {
+            loadState(msg.payload.overrideState);
+          } else if (msg.type === 'emergency.status') {
+            renderEmergencyReason(msg.payload || {});
+          } else if (msg.type === 'server.vital_alert') {
+            renderVitalAlert(msg.payload || {});
+          } else if (msg.type === 'server.periodic_update' && msg.payload?.emergencyState) {
+            renderEmergencyReason(msg.payload.emergencyState);
+          }
+        } catch (e) {
+          console.error('Parse error:', e);
+        }
+      };
+    }
+    
+    // ========================================
+    // State Management
+    // ========================================
+    
+    function loadState(state) {
+      // Load flex
+      if (state.flex) {
+        overrideState.flex = { ...overrideState.flex, ...state.flex };
+        document.getElementById('flexEnabled').checked = state.flex.enabled;
+        document.getElementById('forwardServos').checked = state.flex.forwardToServos || false;
+        
+        if (state.flex.flex_1_2) {
+          document.getElementById('flex12Enabled').checked = state.flex.flex_1_2.enabled;
+          document.getElementById('flex12Min').value = state.flex.flex_1_2.min;
+          document.getElementById('flex12Max').value = state.flex.flex_1_2.max;
+          updateFlexDisplay('flex_1_2');
+        }
+        if (state.flex.flex_3_4) {
+          document.getElementById('flex34Enabled').checked = state.flex.flex_3_4.enabled;
+          document.getElementById('flex34Min').value = state.flex.flex_3_4.min;
+          document.getElementById('flex34Max').value = state.flex.flex_3_4.max;
+          updateFlexDisplay('flex_3_4');
+        }
+        if (state.flex.flex_5) {
+          document.getElementById('flex5Enabled').checked = state.flex.flex_5.enabled;
+          document.getElementById('flex5Min').value = state.flex.flex_5.min;
+          document.getElementById('flex5Max').value = state.flex.flex_5.max;
+          updateFlexDisplay('flex_5');
+        }
+      }
+      
+      // Load biometric
+      if (state.biometric) {
+        overrideState.biometric = state.biometric;
+        document.getElementById('bioEnabled').checked = state.biometric.enabled;
+        document.getElementById('hrMin').value = state.biometric.heart_rate.min;
+        document.getElementById('hrMax').value = state.biometric.heart_rate.max;
+        document.getElementById('spo2Min').value = state.biometric.spo2.min;
+        document.getElementById('spo2Max').value = state.biometric.spo2.max;
+        updateBioDisplay();
+      }
+      
+      // Load mech
+      if (state.mech) {
+        overrideState.mech = state.mech;
+        document.getElementById('mechEnabled').checked = state.mech.enabled;
+        document.getElementById('gasMin').value = state.mech.gas.min;
+        document.getElementById('gasMax').value = state.mech.gas.max;
+        document.getElementById('tempMin').value = state.mech.temperature.min;
+        document.getElementById('tempMax').value = state.mech.temperature.max;
+        document.getElementById('distMin').value = state.mech.ultrasonic.min;
+        document.getElementById('distMax').value = state.mech.ultrasonic.max;
+      }
+      
+      // Load thresholds
+      if (state.thresholds) {
+        if (state.thresholds.temperature) {
+          document.getElementById('tempCritLow').value = state.thresholds.temperature.critical_low;
+          document.getElementById('tempWarnMin').value = state.thresholds.temperature.min;
+          document.getElementById('tempWarnMax').value = state.thresholds.temperature.max;
+          document.getElementById('tempCritHigh').value = state.thresholds.temperature.critical_high;
+          overrideState.thresholds.temperature = { ...state.thresholds.temperature };
+        }
+        if (state.thresholds.gas) {
+          document.getElementById('gasWarnMax').value = state.thresholds.gas.max;
+          document.getElementById('gasCritHigh').value = state.thresholds.gas.critical_high;
+          overrideState.thresholds.gas = { ...state.thresholds.gas };
+        }
+      }
+      
+      // Load auto emergency
+      if (state.autoEmergency !== undefined) {
+        document.getElementById('autoEmergency').checked = state.autoEmergency;
+        overrideState.autoEmergency = state.autoEmergency;
+      }
+      
+      log('State loaded from server');
+    }
+    
+    function updateOverride() {
+      // Read flex state
+      overrideState.flex.enabled = document.getElementById('flexEnabled').checked;
+      overrideState.flex.forwardToServos = document.getElementById('forwardServos').checked;
+      overrideState.flex.flex_1_2.enabled = document.getElementById('flex12Enabled').checked;
+      overrideState.flex.flex_1_2.min = parseFloat(document.getElementById('flex12Min').value);
+      overrideState.flex.flex_1_2.max = parseFloat(document.getElementById('flex12Max').value);
+      overrideState.flex.flex_3_4.enabled = document.getElementById('flex34Enabled').checked;
+      overrideState.flex.flex_3_4.min = parseFloat(document.getElementById('flex34Min').value);
+      overrideState.flex.flex_3_4.max = parseFloat(document.getElementById('flex34Max').value);
+      overrideState.flex.flex_5.enabled = document.getElementById('flex5Enabled').checked;
+      overrideState.flex.flex_5.min = parseFloat(document.getElementById('flex5Min').value);
+      overrideState.flex.flex_5.max = parseFloat(document.getElementById('flex5Max').value);
+      
+      // Read biometric state
+      overrideState.biometric.enabled = document.getElementById('bioEnabled').checked;
+      overrideState.biometric.heart_rate.min = parseFloat(document.getElementById('hrMin').value);
+      overrideState.biometric.heart_rate.max = parseFloat(document.getElementById('hrMax').value);
+      overrideState.biometric.spo2.min = parseFloat(document.getElementById('spo2Min').value);
+      overrideState.biometric.spo2.max = parseFloat(document.getElementById('spo2Max').value);
+      
+      // Read mech state
+      overrideState.mech.enabled = document.getElementById('mechEnabled').checked;
+      overrideState.mech.gas.min = parseFloat(document.getElementById('gasMin').value);
+      overrideState.mech.gas.max = parseFloat(document.getElementById('gasMax').value);
+      overrideState.mech.temperature.min = parseFloat(document.getElementById('tempMin').value);
+      overrideState.mech.temperature.max = parseFloat(document.getElementById('tempMax').value);
+      overrideState.mech.ultrasonic.min = parseFloat(document.getElementById('distMin').value);
+      overrideState.mech.ultrasonic.max = parseFloat(document.getElementById('distMax').value);
+      
+      // Read auto emergency
+      overrideState.autoEmergency = document.getElementById('autoEmergency').checked;
+      
+      // Update displays
+      updateFlexDisplay('flex_1_2');
+      updateFlexDisplay('flex_3_4');
+      updateFlexDisplay('flex_5');
+      updateBioDisplay();
+      
+      // Send to server
+      sendOverride();
+    }
+    
+    function updateThresholds() {
+      overrideState.thresholds.temperature = {
+        critical_low: parseFloat(document.getElementById('tempCritLow').value),
+        min: parseFloat(document.getElementById('tempWarnMin').value),
+        max: parseFloat(document.getElementById('tempWarnMax').value),
+        critical_high: parseFloat(document.getElementById('tempCritHigh').value)
+      };
+      
+      overrideState.thresholds.gas = {
+        min: 0,
+        max: parseFloat(document.getElementById('gasWarnMax').value),
+        critical_low: 0,
+        critical_high: parseFloat(document.getElementById('gasCritHigh').value)
+      };
+      
+      sendOverride();
+      log('Thresholds updated');
+    }
+    
+    function sendOverride() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      
+      ws.send(JSON.stringify({
+        type: 'admin_override',
+        overrideState: overrideState
+      }));
+    }
+    
+    // ========================================
+    // Display Updates
+    // ========================================
+    
+    function updateFlexDisplay(sensor) {
+      const id = sensor.replace(/_/g, '');
+      const min = overrideState.flex[sensor].min;
+      const max = overrideState.flex[sensor].max;
+      document.getElementById(`${id}Value`).textContent = `${min} - ${max}%`;
+    }
+    
+    function updateBioDisplay() {
+      document.getElementById('hrValue').textContent = 
+        `${overrideState.biometric.heart_rate.min} - ${overrideState.biometric.heart_rate.max} BPM`;
+      document.getElementById('spo2Value').textContent = 
+        `${overrideState.biometric.spo2.min} - ${overrideState.biometric.spo2.max}%`;
+    }
+    
+    // ========================================
+    // Presets
+    // ========================================
+    
+    function setFlexPreset(sensor, min, max) {
+      const id = sensor.replace(/_/g, '');
+      document.getElementById(`${id}Min`).value = min;
+      document.getElementById(`${id}Max`).value = max;
+      updateOverride();
+      log(`Flex ${sensor} set to ${min}-${max}%`);
+    }
+    
+    function setAllFlexPreset(preset) {
+      let min, max;
+      switch (preset) {
+        case 'open': min = 0; max = 5; break;
+        case 'neutral': min = 45; max = 55; break;
+        case 'closed': min = 95; max = 100; break;
+      }
+      setFlexPreset('flex_1_2', min, max);
+      setFlexPreset('flex_3_4', min, max);
+      setFlexPreset('flex_5', min, max);
+    }
+    
+    function setBioPreset(preset) {
+      switch (preset) {
+        case 'normal':
+          document.getElementById('hrMin').value = 70;
+          document.getElementById('hrMax').value = 80;
+          document.getElementById('spo2Min').value = 97;
+          document.getElementById('spo2Max').value = 99;
+          break;
+        case 'elevated':
+          document.getElementById('hrMin').value = 105;
+          document.getElementById('hrMax').value = 115;
+          document.getElementById('spo2Min').value = 93;
+          document.getElementById('spo2Max').value = 95;
+          break;
+        case 'critical':
+          document.getElementById('hrMin').value = 155;
+          document.getElementById('hrMax').value = 165;
+          document.getElementById('spo2Min').value = 80;
+          document.getElementById('spo2Max').value = 84;
+          break;
+      }
+      updateOverride();
+      log(`Biometric preset: ${preset}`);
+    }
+    
+    function setMechPreset(preset) {
+      switch (preset) {
+        case 'safe':
+          document.getElementById('gasMin').value = 3;
+          document.getElementById('gasMax').value = 7;
+          document.getElementById('tempMin').value = 23;
+          document.getElementById('tempMax').value = 25;
+          document.getElementById('distMin').value = 95;
+          document.getElementById('distMax').value = 105;
+          break;
+        case 'warning':
+          document.getElementById('gasMin').value = 32;
+          document.getElementById('gasMax').value = 38;
+          document.getElementById('tempMin').value = 47;
+          document.getElementById('tempMax').value = 49;
+          document.getElementById('distMin').value = 8;
+          document.getElementById('distMax').value = 12;
+          break;
+        case 'danger':
+          document.getElementById('gasMin').value = 58;
+          document.getElementById('gasMax').value = 65;
+          document.getElementById('tempMin').value = 52;
+          document.getElementById('tempMax').value = 56;
+          document.getElementById('distMin').value = 1;
+          document.getElementById('distMax').value = 3;
+          break;
+      }
+      updateOverride();
+      log(`Mech preset: ${preset}`);
+    }
+    
+    function resetThresholds() {
+      document.getElementById('tempCritLow').value = 15;
+      document.getElementById('tempWarnMin').value = 20;
+      document.getElementById('tempWarnMax').value = 50;
+      document.getElementById('tempCritHigh').value = 55;
+      document.getElementById('gasWarnMax').value = 30;
+      document.getElementById('gasCritHigh').value = 50;
+      updateThresholds();
+      log('Thresholds reset to defaults', 'warning');
+    }
+
+    function setThresholdPreset(preset) {
+      if (preset === 'balanced') {
+        document.getElementById('tempCritLow').value = 15;
+        document.getElementById('tempWarnMin').value = 20;
+        document.getElementById('tempWarnMax').value = 50;
+        document.getElementById('tempCritHigh').value = 55;
+      } else if (preset === 'highTemp') {
+        document.getElementById('tempCritLow').value = 16;
+        document.getElementById('tempWarnMin').value = 24;
+        document.getElementById('tempWarnMax').value = 50;
+        document.getElementById('tempCritHigh').value = 55;
+      } else if (preset === 'strict') {
+        document.getElementById('tempCritLow').value = 15;
+        document.getElementById('tempWarnMin').value = 20;
+        document.getElementById('tempWarnMax').value = 38;
+        document.getElementById('tempCritHigh').value = 45;
       }
 
-      // Initialize all panel contents to be visible
-      window.addEventListener("DOMContentLoaded", () => {
-        document.querySelectorAll(".panel-content").forEach((content) => {
-          content.style.maxHeight = content.scrollHeight + "px";
-        });
-        
-        connectWebSocket();
+      updateThresholds();
+      log(`Threshold preset applied: ${preset}`);
+    }
+
+    function applyScenario(scenario) {
+      document.getElementById('mechEnabled').checked = true;
+
+      if (scenario === 'heat') {
+        document.getElementById('gasMin').value = 4;
+        document.getElementById('gasMax').value = 9;
+        document.getElementById('tempMin').value = 52;
+        document.getElementById('tempMax').value = 56;
+        document.getElementById('distMin').value = 60;
+        document.getElementById('distMax').value = 90;
+      } else if (scenario === 'gas') {
+        document.getElementById('gasMin').value = 58;
+        document.getElementById('gasMax').value = 75;
+        document.getElementById('tempMin').value = 28;
+        document.getElementById('tempMax').value = 33;
+        document.getElementById('distMin').value = 55;
+        document.getElementById('distMax').value = 95;
+      } else if (scenario === 'distance') {
+        document.getElementById('gasMin').value = 6;
+        document.getElementById('gasMax').value = 10;
+        document.getElementById('tempMin').value = 25;
+        document.getElementById('tempMax').value = 30;
+        document.getElementById('distMin').value = 1;
+        document.getElementById('distMax').value = 4;
+      } else if (scenario === 'multi') {
+        document.getElementById('gasMin').value = 60;
+        document.getElementById('gasMax').value = 80;
+        document.getElementById('tempMin').value = 53;
+        document.getElementById('tempMax').value = 57;
+        document.getElementById('distMin').value = 1;
+        document.getElementById('distMax').value = 3;
+      }
+
+      updateOverride();
+      log(`Scenario applied: ${scenario}`, 'warning');
+    }
+
+    function renderVitalAlert(payload) {
+      if (!payload?.level || !Array.isArray(payload.abnormal)) return;
+      if (payload.abnormal.length === 0) return;
+      const summary = payload.abnormal
+        .map(item => `${item.sensor}=${item.value}${item.unit || ''} (${item.status || item.level})`)
+        .join(', ');
+      log(`Vital ${payload.level}: ${summary}`, payload.level === 'emergency' ? 'danger' : 'warning');
+    }
+
+    function renderEmergencyReason(emergency) {
+      const titleEl = document.getElementById('reasonTitle');
+      const detailEl = document.getElementById('reasonDetail');
+      const listEl = document.getElementById('abnormalList');
+
+      if (!emergency?.active) {
+        titleEl.textContent = 'No active emergency reason';
+        detailEl.textContent = 'Detailed abnormal readings will appear here when emergency is active.';
+        listEl.innerHTML = '';
+        return;
+      }
+
+      const reason = emergency.reason || {};
+      titleEl.textContent = reason.summary || 'Emergency active';
+      detailEl.textContent = reason.detailText || 'Emergency is active but no detailed reason payload was provided.';
+
+      const readings = Array.isArray(reason.abnormalReadings)
+        ? reason.abnormalReadings
+        : (Array.isArray(emergency.triggeredBy) ? emergency.triggeredBy : []);
+
+      if (readings.length === 0) {
+        listEl.innerHTML = '<li>No abnormal readings attached to this emergency event.</li>';
+        return;
+      }
+
+      listEl.innerHTML = readings.map(item => {
+        const unit = item.unit || '';
+        const status = item.status ? String(item.status).replace(/_/g, ' ') : (item.level || 'unknown');
+        const threshold = item.threshold !== undefined ? ` | threshold: ${item.threshold}${unit}` : '';
+        const deviation = item.deviation !== undefined ? ` | deviation: ${item.deviation}${unit}` : '';
+        const message = item.message || `${item.sensor}: ${item.value}${unit} (${status})`;
+        return `<li><strong>${item.sensor || 'sensor'}</strong> -> ${message}${threshold}${deviation}</li>`;
+      }).join('');
+    }
+    
+    // ========================================
+    // Emergency
+    // ========================================
+    
+    function triggerEmergency() {
+      if (!confirm('Trigger emergency on ALL devices?')) return;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        alert('Not connected');
+        return;
+      }
+      ws.send(JSON.stringify({
+        type: 'emergency_alert',
+        active: true,
+        timestamp: Date.now()
+      }));
+      log('Emergency TRIGGERED', 'danger');
+    }
+    
+    function clearEmergency() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({
+        type: 'emergency_ack',
+        timestamp: Date.now()
+      }));
+      log('Emergency cleared', 'success');
+    }
+    
+    // ========================================
+    // Reset & UI
+    // ========================================
+    
+    function resetAll() {
+      if (!confirm('Reset all overrides to defaults?')) return;
+      
+      // Reset checkboxes
+      document.getElementById('flexEnabled').checked = false;
+      document.getElementById('forwardServos').checked = false;
+      document.getElementById('flex12Enabled').checked = false;
+      document.getElementById('flex34Enabled').checked = false;
+      document.getElementById('flex5Enabled').checked = false;
+      document.getElementById('bioEnabled').checked = false;
+      document.getElementById('mechEnabled').checked = false;
+      document.getElementById('autoEmergency').checked = true;
+      
+      // Reset values
+      setFlexPreset('flex_1_2', 45, 55);
+      setFlexPreset('flex_3_4', 45, 55);
+      setFlexPreset('flex_5', 45, 55);
+      setBioPreset('normal');
+      setMechPreset('safe');
+      resetThresholds();
+      
+      updateOverride();
+      log('All overrides reset', 'warning');
+    }
+    
+    function togglePanel(header) {
+      header.classList.toggle('collapsed');
+      const content = header.nextElementSibling;
+      
+      if (header.classList.contains('collapsed')) {
+        content.classList.add('collapsed');
+      } else {
+        content.classList.remove('collapsed');
+        content.style.maxHeight = content.scrollHeight + 'px';
+      }
+    }
+    
+    function log(message, type = 'info') {
+      const container = document.getElementById('logContainer');
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      
+      const time = new Date().toLocaleTimeString();
+      entry.innerHTML = `
+        <span class="log-time">${time}</span>
+        <span class="log-msg ${type}">${message}</span>
+      `;
+      
+      container.insertBefore(entry, container.firstChild);
+      
+      // Keep only 50 entries
+      while (container.children.length > 50) {
+        container.removeChild(container.lastChild);
+      }
+    }
+    
+    function clearLog() {
+      const container = document.getElementById('logContainer');
+      container.innerHTML = `
+        <div class="log-entry">
+          <span class="log-time">--:--:--</span>
+          <span class="log-msg">Log cleared</span>
+        </div>
+      `;
+    }
+    
+    // ========================================
+    // Initialize
+    // ========================================
+    
+    document.addEventListener('DOMContentLoaded', () => {
+      // Set initial panel heights
+      document.querySelectorAll('.panel-content').forEach(content => {
+        content.style.maxHeight = content.scrollHeight + 'px';
       });
-    </script>
-  </body>
+      
+      connect();
+    });
+  </script>
+</body>
 </html>
